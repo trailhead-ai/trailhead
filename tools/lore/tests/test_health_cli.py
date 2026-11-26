@@ -17,9 +17,9 @@ import pytest
 from conftest import load_script, run_cli, write_vault_config
 
 ROW_RE = re.compile(
-    r"^(\S+)\s+(dangling-links|retired-links|stale-tasks|missing-paths|distill-queue)\s+(\S+)\s+(\S+)\s+(.*)$")
-CHECKS = ("dangling-links", "retired-links", "stale-tasks", "missing-paths", "distill-queue")
-GROUP_RE = re.compile(r"^(dangling-links|retired-links|stale-tasks|missing-paths|distill-queue) — ")
+    r"^(\S+)\s+(dangling-links|retired-links|stale-tasks|missing-paths|distill-queue|lesson-growth)\s+(\S+)\s+(\S+)\s+(.*)$")
+CHECKS = ("dangling-links", "retired-links", "stale-tasks", "missing-paths", "distill-queue", "lesson-growth")
+GROUP_RE = re.compile(r"^(dangling-links|retired-links|stale-tasks|missing-paths|distill-queue|lesson-growth) — ")
 FINDING_RE = re.compile(r"^  \S.*(not found in any vault|not shaped like a record id)$")
 
 
@@ -251,7 +251,7 @@ def test_unreadable_vault_skips_every_row_and_names_it(world):
         assert rows(r.stdout)[v][2] == "yes: vault levr could not be read, so no target can be confirmed missing", v
     assert rows(r.stdout)["levr"][2] == "yes: its directory could not be read"
     assert finding_lines(r.stdout) == []
-    assert "no findings" not in r.stdout
+    assert "dangling-links — no findings" not in r.stdout
     assert "dangling-links — skipped." in r.stdout
     assert ("Could not confirm the count against the index: vault levr was not fully read. "
             "1 record the index would hold (sessions included).") in r.stdout
@@ -271,9 +271,7 @@ def test_records_outside_the_vault_root_skip_the_check_and_are_counted_nameless(
             "0 records the index would hold (sessions included).") in r.stdout
     assert "trailhead: 1 record lies outside the vault root and was not read." in r.stdout
     assert "secret-name" not in r.stdout and "elsewhere" not in r.stdout
-    assert all(v[2].startswith("yes:") for v in rows(r.stdout).values())
-    assert rows(r.stdout)["default"][2] == (
-        "yes: vault trailhead could not be fully read, so no target can be confirmed missing")
+    assert rows(r.stdout)["default"][2] == "no"
     assert rows(r.stdout)["trailhead"][2] == "yes: records lie outside its vault root and were not read"
 
 
@@ -670,7 +668,7 @@ def test_unreadable_kind_directory_in_another_vault_skips_the_check(world):
         assert skipped.startswith("yes:"), vault
     assert got["default"][2] == "yes: vault levr could not be read, so no target can be confirmed missing"
     assert finding_lines(r.stdout) == []
-    assert "no findings" not in r.stdout
+    assert "dangling-links — no findings" not in r.stdout
 
 
 def test_missing_vault_directory_skips_the_check_and_says_so(world):
@@ -934,14 +932,19 @@ def _unreadable_world(world):
 def test_an_unreadable_vault_skips_both_checks_each_with_its_own_reason(world):
     r = _unreadable_world(world)
     assert r.returncode == 0, r.stderr
-    assert len(all_rows(r.stdout)) == 15
+    assert len(all_rows(r.stdout)) == 18
     for v in ("default", "trailhead"):
         assert rows(r.stdout)[v][2] == "yes: vault levr could not be read, so no target can be confirmed missing"
         assert rows(r.stdout, "retired-links")[v][2] == (
             "yes: vault levr could not be read, so no target's status can be confirmed")
-    for check in CHECKS:
+    for check in CHECKS[:-1]:
         assert rows(r.stdout, check)["levr"] == ("—", "—", "yes: its directory could not be read")
         assert group(r.stdout, check) == [f"{check} — skipped."]
+    assert rows(r.stdout, "lesson-growth")["levr"] == (
+        "—", "—", "yes: its directory could not be read, so its lessons cannot all be counted")
+    assert rows(r.stdout, "lesson-growth")["default"] == ("0", "0", "no")
+    assert group(r.stdout, "lesson-growth") == [
+        "lesson-growth — no findings (window: 30 days): default 0 lessons, 0 added; trailhead 0 lessons, 0 added."]
 
 
 def test_vault_flag_narrows_both_checks_while_a_successor_elsewhere_is_named(world):
@@ -1027,7 +1030,7 @@ def test_a_render_that_raises_errors_only_its_check(world, monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(health, "CHECKS", tuple(
-        replace(c, render=boom) if c.name == "retired-links" else c for c in health.CHECKS))
+        replace(c, evidence=boom) if c.name == "retired-links" else c for c in health.CHECKS))
     r = world.run()
     assert r.returncode == 0, r.stderr
     assert group(r.stdout, "retired-links") == ["retired-links — errored: RuntimeError."]
@@ -1153,7 +1156,9 @@ def test_groups_are_separated_by_one_blank_line_and_the_report_ends_on_the_last_
     assert lines[fourth - 1] == "" and lines[fourth - 2] == ACTION
     fifth = lines.index("distill-queue — no findings.")
     assert lines[fifth - 1] == "" and lines[fifth - 2] == "missing-paths — skipped."
-    assert lines[-2] == "distill-queue — no findings."
+    sixth = lines.index(next(ln for ln in lines if ln.startswith("lesson-growth — ")))
+    assert lines[sixth - 1] == "" and lines[sixth - 2] == "distill-queue — no findings."
+    assert lines[-2] == lines[sixth]
 
 
 TIMESTAMP_SHAPES = {
@@ -1222,7 +1227,7 @@ def test_build_report_hands_every_runner_the_same_run_context(world, monkeypatch
     monkeypatch.setattr(health, "CHECKS", tuple(replace(c, run=spy) for c in health.CHECKS))
     now = datetime(2026, 7, 4, 12, 0, tzinfo=timezone.utc)
     report = health.build_report(now=now, stale_days=45)
-    assert len(seen) == 5 and all(c is report.ctx for c in seen)
+    assert len(seen) == 6 and all(c is report.ctx for c in seen)
     assert (seen[0].now, seen[0].stale_days) == (now, 45)
     assert health.build_report().ctx.now.tzinfo is not None
 
@@ -1601,7 +1606,7 @@ def _line_for(finding_name, candidate_name, *, links_back=True):
                                     links_back=links_back, supersede_allowed=True)
     f = retired.Finding("default", "adr", finding_name, "2026-03-01", "related decision",
                         "decision/old", (cand,))
-    return health._retired_line(f)
+    return health._line(f, health._retired_evidence(f))
 
 
 @pytest.mark.parametrize("linker,target", [("Bad Name", "old"), ("src", "Bad Name"),
@@ -1988,9 +1993,9 @@ def test_a_vault_with_records_outside_its_root_is_skipped_with_the_shared_wordin
     outside.mkdir()
     (outside / "x.json").write_text(json.dumps({"title": "x", "status": "active"}))
     (outside / "x.md").write_text("x\n")
-    (world.roots["levr"] / "lesson").mkdir()
-    os.symlink(outside / "x.json", world.roots["levr"] / "lesson" / "x.json")
-    os.symlink(outside / "x.md", world.roots["levr"] / "lesson" / "x.md")
+    (world.roots["levr"] / "decision").mkdir()
+    os.symlink(outside / "x.json", world.roots["levr"] / "decision" / "x.json")
+    os.symlink(outside / "x.md", world.roots["levr"] / "decision" / "x.md")
     r = world.run()
     assert rows(r.stdout, "missing-paths")["levr"] == (
         "—", "—", "yes: records lie outside its vault root and were not read")
@@ -2187,7 +2192,7 @@ def test_the_check_and_its_heading_note_see_the_views_the_seam_built_once(world,
     views = {v: "unbound" for v in VAULTS}
     built, seen = [], []
 
-    def seam(selected, *, env=None):
+    def seam(selected, *, env=None, passed=None):
         built.append(list(selected))
         return views
 
@@ -2393,7 +2398,7 @@ def test_an_unreadable_vault_skips_the_check_on_every_row_naming_it(world):
     assert group(r.stdout, DQ) == [f"{DQ} — skipped."]
 
 
-def test_a_distill_check_that_raises_is_errored_while_the_other_four_still_render(world, monkeypatch):
+def test_a_distill_check_that_raises_is_errored_while_the_other_five_still_render(world, monkeypatch):
     d = world.roots["default"]
     _put(d, "decision", "gone", status="dropped")
     _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
@@ -2406,7 +2411,7 @@ def test_a_distill_check_that_raises_is_errored_while_the_other_four_still_rende
     assert r.returncode == 0, r.stderr
     for v in ("default", "trailhead", "levr"):
         assert rows(r.stdout, DQ)[v] == ("—", "—", "errored: RuntimeError")
-        for other in CHECKS[:-1]:
+        for other in (c for c in CHECKS if c != DQ):
             assert rows(r.stdout, other)[v][2] != "errored: RuntimeError"
     assert group(r.stdout, DQ) == [f"{DQ} — errored: RuntimeError."]
     assert group(r.stdout, "retired-links")[0] == "retired-links — 1 finding, oldest first"
@@ -2442,3 +2447,1049 @@ def test_a_vault_name_with_control_characters_is_escaped_in_the_distill_group(tm
     r = w.run()
     assert "\x1b" not in r.stdout
     assert "ev\\nil\\x1b[31mv/spec/waits" in group(r.stdout, DQ)[1]
+
+
+# --- the scan budget and kind-aware escapes ---------------------------------------
+
+
+def _big(root, n=3, size=900 * 1024):
+    for i in range(n):
+        _put(root, "lesson", f"big{i}")
+        (root / "lesson" / f"big{i}.md").write_text("x" * size)
+
+
+BUDGET_REASON = "yes: its records exceed the report's size budget of 1 MiB; pass --max-scan-mib to raise it"
+
+
+def test_a_vault_past_the_budget_skips_every_check_with_the_size_reason_then_reports_when_raised(world):
+    _big(world.roots["levr"])
+    _put(world.roots["default"], "lesson", "a", related={"decision": ["gone"]})
+    r = world.run("--max-scan-mib", "1")
+    assert r.returncode == 0, r.stderr
+    for check in CHECKS[:-1]:
+        assert rows(r.stdout, check)["levr"][2] == BUDGET_REASON, check
+    assert rows(r.stdout, "lesson-growth")["levr"][2] == f"{BUDGET_REASON}, so its lessons cannot all be counted"
+    assert finding_lines(r.stdout) == []
+    r = world.run("--max-scan-mib", "64")
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout)["levr"] == ("3", "0", "no")
+    assert rows(r.stdout)["default"] == ("1", "1", "no")
+
+
+def test_a_symlinked_decision_directory_skips_only_the_checks_that_judge_decisions(world, tmp_path):
+    ext = tmp_path / "ext"
+    _put(ext, "decision", "hidden")
+    (world.roots["trailhead"] / "decision").symlink_to(ext / "decision", target_is_directory=True)
+    _put(world.roots["trailhead"], "task", "t", status="open")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    for check in ("dangling-links", "retired-links", "missing-paths"):
+        assert rows(r.stdout, check)["trailhead"][2].startswith("yes:"), check
+    assert rows(r.stdout, "stale-tasks")["trailhead"][2] == "no"
+    assert rows(r.stdout, "distill-queue")["trailhead"][2] == "no"
+    assert "hidden" not in r.stdout and "ext" not in r.stdout.replace("extra", "")
+
+
+def test_a_symlinked_decision_directory_skips_only_the_vault_holding_it_for_links_checks(world, tmp_path):
+    ext = tmp_path / "ext"
+    _put(ext, "decision", "hidden")
+    (world.roots["trailhead"] / "decision").symlink_to(ext / "decision", target_is_directory=True)
+    levr = world.roots["levr"]
+    _put(levr, "lesson", "src", related={"lesson": ["gone"]})
+    _put(levr, "lesson", "old", status="dropped")
+    _put(levr, "task", "t", status="open", related={"lesson": ["old"], "decision": ["hidden"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    for check in ("dangling-links", "retired-links"):
+        expected = "yes: records lie outside its vault root and were not read"
+        assert rows(r.stdout, check)["trailhead"][2] == expected, check
+        assert rows(r.stdout, check)["levr"][2] == "no", check
+        assert rows(r.stdout, check)["default"][2] == "no", check
+    assert rows(r.stdout, "dangling-links")["levr"][1] == "1"
+    assert rows(r.stdout, "retired-links")["levr"][1] == "1"
+    assert "lesson/gone" in r.stdout and "lesson/old" in r.stdout
+    assert "decision/hidden" not in r.stdout
+
+
+def test_an_escaping_session_record_named_as_a_link_target_is_not_reported_dangling(world, tmp_path):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "s.md").write_text("x")
+    (outside / "s.json").write_text("{}")
+    sess = world.roots["trailhead"] / "session"
+    sess.mkdir()
+    (sess / "s1.md").symlink_to(outside / "s.md")
+    (sess / "s1.json").symlink_to(outside / "s.json")
+    _put(world.roots["default"], "task", "t", status="open", related={"session": ["s1", "never-was"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    lines = finding_lines(r.stdout)
+    assert any("session/never-was" in ln for ln in lines)
+    assert not any("session/s1" in ln for ln in lines)
+    assert rows(r.stdout, "dangling-links")["default"] == ("1", "1", "no")
+
+
+# --- the stale-tasks drop remedy when a task name is shared across vaults --------
+
+import shlex  # noqa: E402
+
+from conftest import make_git_vault  # noqa: E402
+
+
+def _two_vault_world(tmp_path, other="trailhead"):
+    """Two git vaults, ``default`` and *other*, each holding ``task/x``; only *other*'s is stale."""
+    from types import SimpleNamespace
+    roots = {n: make_git_vault(tmp_path / f"v{i}") for i, n in enumerate(("default", other))}
+    cfg, state = tmp_path / "config", tmp_path / "state"
+    (state / "lore" / "vaults").mkdir(parents=True)
+    write_vault_config(cfg, [("default", "default", roots["default"]), (other, "team", roots[other])])
+    for n, days in (("default", 1), (other, 60)):
+        _stale_put(roots[n], "x", days)
+        side = roots[n] / "task" / "x.json"
+        side.write_text(json.dumps({**json.loads(side.read_text()), "kind": "task",
+                                    "created-at": "2026-01-01T00:00:00Z"}))
+    return SimpleNamespace(roots=roots, cfg=cfg, state=state, other=other)
+
+
+def _shared_stale_lines(w, monkeypatch):
+    out = _stale_run(w, monkeypatch)
+    return [ln for ln in _stale_group(out)[1:-1]]
+
+
+def _run_drop(w, command):
+    argv = shlex.split(command)
+    assert argv[:2] == ["lore", "record"]
+    body = (w.roots[w.other] / "task" / "x.md").read_text()
+    import difflib
+    diff = "".join(difflib.unified_diff(body.splitlines(True), (body + "why\n").splitlines(True),
+                                        "a/x.md", "b/x.md"))
+    return run_cli(argv[1:], vault=w.roots["default"], state_dir=w.state,
+                   stdin_text=diff, env_extra={"XDG_CONFIG_HOME": str(w.cfg)})
+
+
+def _printed_drop_command(line):
+    return re.search(r"`(lore record update [^`]*)`", line).group(1)
+
+
+def test_a_stale_task_shared_with_another_vault_prints_a_drop_command_that_drops_its_own_copy(
+        tmp_path, monkeypatch):
+    w = _two_vault_world(tmp_path)
+    (line,) = _shared_stale_lines(w, monkeypatch)
+    assert "default" in line and "--vault trailhead" in line
+    r = _run_drop(w, _printed_drop_command(line))
+    assert r.returncode == 0, r.stderr
+    def status(n):
+        return json.loads((w.roots[n] / "task" / "x.json").read_text())["status"]
+
+    assert (status("trailhead"), status("default")) == ("dropped", "open")
+
+
+def test_a_unique_stale_task_keeps_the_plain_line_and_names_no_vault(world, monkeypatch):
+    _stale_put(world.roots["default"], "y", 60)
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out)[1:-1] == ["  default/task/y  2026-09-02  open  last updated 60 days ago"]
+    assert "--vault" not in out
+
+
+@pytest.mark.parametrize("other", ["my vault", "it's"])
+def test_a_vault_name_with_a_space_or_quote_is_printed_quoted_and_the_command_still_works(
+        tmp_path, monkeypatch, other):
+    w = _two_vault_world(tmp_path, other)
+    (line,) = _shared_stale_lines(w, monkeypatch)
+    command = _printed_drop_command(line)
+    assert f"--vault {shlex.quote(other)}" in command
+    assert shlex.split(command)[-1] == other
+    r = _run_drop(w, command)
+    assert r.returncode == 0, r.stderr
+    assert json.loads((w.roots[other] / "task" / "x.json").read_text())["status"] == "dropped"
+
+
+@pytest.mark.parametrize("vault_name,task_name", [("bad\x1bvault", "x"), ("trailhead", "Bad Name")])
+def test_a_name_that_fails_the_shape_check_prints_no_command_only_the_vault_instruction(
+        vault_name, task_name):
+    health = importlib.import_module("lore.cli.health")
+    stale_mod = importlib.import_module("lore.health.stale")
+    f = stale_mod.Finding(vault_name, "task", task_name, "2026-09-01T00:00:00+00:00", "open", 60, False,
+                          duplicated_in=("default",))
+    line = health._line(f, health._stale_evidence(f))
+    assert "`" not in line and "--status dropped" not in line
+    assert "--vault" in line
+    assert "\x1b" not in line
+
+
+# --- lesson-growth -------------------------------------------------------------
+
+LABEL = {"craft/dispatch-lesson": "executor"}
+
+
+def _stamp(days):
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _lesson(root, name, days, **extra):
+    extra.setdefault("labels", LABEL)
+    _put(root, "lesson", name, **{"created-at": _stamp(days), **extra})
+
+
+def _growth(out):
+    return group(out, "lesson-growth")
+
+
+def test_lesson_growth_heading_totals_percentage_and_findings_oldest_first(world):
+    root = world.roots["trailhead"]
+    for i in range(181):
+        _lesson(root, f"old-{i}", 60 + i % 20)
+    for i in range(31):
+        _lesson(root, f"new-{i:02d}", 2 + i % 20)
+    _lesson(world.roots["default"], "d-new", 3)
+    for i in range(2):
+        _lesson(world.roots["default"], f"d-old-{i}", 90)
+    r = world.run("--all")
+    assert r.returncode == 0, r.stderr
+    got = rows(r.stdout, "lesson-growth")
+    assert got["trailhead"] == ("212", "31", "no")
+    assert got["default"] == ("3", "1", "no")
+    assert got["levr"] == ("0", "0", "no")
+    block = _growth(r.stdout)
+    assert block[0] == ("lesson-growth — 32 findings, oldest first (window: 30 days): "
+                        "default 3 lessons, 1 added (33%); trailhead 212 lessons, 31 added (15%); "
+                        "levr 0 lessons, 0 added")
+    body = block[1:-1]
+    assert len(body) == 32
+    assert body == sorted(body, key=lambda ln: -int(ln.rsplit("added ", 1)[1].split(" ")[0]))
+    assert re.fullmatch(r"  trailhead/lesson/new-\d\d  \d{4}-\d\d-\d\d  added \d+ days ago", body[0]), body[0]
+    assert block[-1].startswith("These are informational, not problems to fix.")
+    assert "/craft:consolidate" in block[-1]
+
+
+def test_lesson_growth_with_no_lessons_says_so_and_prints_no_action_line(world):
+    r = world.run("--vault", "default")
+    assert rows(r.stdout, "lesson-growth")["default"] == ("0", "0", "no")
+    assert _growth(r.stdout) == ["lesson-growth — no findings (window: 30 days): default 0 lessons, 0 added."]
+
+
+def test_lesson_growth_vault_with_a_corpus_and_no_growth_reads_zero_added(world):
+    _lesson(world.roots["default"], "old", 90)
+    r = world.run("--vault", "default")
+    assert rows(r.stdout, "lesson-growth")["default"] == ("1", "0", "no")
+    assert _growth(r.stdout) == ["lesson-growth — no findings (window: 30 days): default 1 lesson, 0 added (0%)."]
+
+
+@pytest.mark.parametrize("days,window,added", [("--stale-days", "7", 0), ("--stale-days", "14", 1)])
+def test_lesson_growth_follows_the_stale_days_window(world, days, window, added):
+    _lesson(world.roots["default"], "l", 10)
+    r = world.run("--vault", "default", days, window)
+    assert rows(r.stdout, "lesson-growth")["default"][1] == str(added)
+    assert f"(window: {window} days)" in _growth(r.stdout)[0]
+
+
+def test_lesson_growth_skips_a_vault_with_an_unreadable_lesson_and_reports_the_rest(world):
+    _lesson(world.roots["default"], "ok", 1)
+    (world.roots["trailhead"] / "lesson").mkdir()
+    (world.roots["trailhead"] / "lesson" / "bad.json").write_text("{not json")
+    (world.roots["trailhead"] / "lesson" / "bad.md").write_text("x")
+    r = world.run()
+    got = rows(r.stdout, "lesson-growth")
+    assert got["default"] == ("1", "1", "no")
+    assert got["trailhead"] == ("—", "—",
+                                "yes: vault trailhead holds a lesson record that could not be read, "
+                                "so its lessons cannot all be counted")
+    assert _growth(r.stdout)[0].endswith("default 1 lesson, 1 added (100%); levr 0 lessons, 0 added")
+
+
+def test_lesson_growth_counts_an_oversize_body_lesson_from_its_sidecar(world):
+    root = world.roots["trailhead"]
+    _lesson(root, "plain", 1)
+    _lesson(root, "big", 2, body="x" * (1024 * 1024 + 1))
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout, "lesson-growth")["trailhead"] == ("2", "2", "no")
+    assert _growth(r.stdout)[0].startswith("lesson-growth — 2 findings, oldest first")
+    assert any("trailhead/lesson/big" in ln for ln in _growth(r.stdout))
+
+
+def test_lesson_growth_skips_a_vault_whose_lesson_has_an_oversize_sidecar(world):
+    root = world.roots["trailhead"]
+    _lesson(root, "plain", 1)
+    _lesson(root, "bigsc", 2, pad="y" * (1024 * 1024 + 1))
+    _lesson(world.roots["default"], "ok", 1)
+    got = rows(world.run().stdout, "lesson-growth")
+    assert got["default"] == ("1", "1", "no")
+    assert got["trailhead"] == ("—", "—", "yes: vault trailhead holds a lesson record that could not be read, "
+                                          "so its lessons cannot all be counted")
+
+
+def test_lesson_growth_skips_a_vault_whose_lesson_escapes_and_reports_the_rest(world, tmp_path):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "n.md").write_text("x")
+    esc = world.roots["trailhead"] / "lesson"
+    esc.mkdir()
+    (esc / "esc.md").symlink_to(outside / "n.md")
+    (esc / "esc.json").write_text("{}")
+    _lesson(world.roots["default"], "ok", 1)
+    got = rows(world.run().stdout, "lesson-growth")
+    assert got["default"] == ("1", "1", "no")
+    assert got["trailhead"] == ("—", "—", "yes: records lie outside its vault root and were not read"
+                                ", so its lessons cannot all be counted")
+
+
+def test_lesson_growth_is_skipped_when_every_vault_is_skipped(world):
+    shutil.rmtree(world.roots["default"])
+    r = world.run("--vault", "default")
+    assert _growth(r.stdout) == ["lesson-growth — skipped."]
+    assert rows(r.stdout, "lesson-growth")["default"][2] == (
+        "yes: its directory does not exist, so its lessons cannot all be counted")
+
+
+def test_lesson_growth_skips_a_vault_that_is_not_fully_read(world):
+    kind_dir = world.roots["levr"] / "lesson"
+    kind_dir.mkdir()
+    _lesson(world.roots["default"], "ok", 1)
+    os.chmod(kind_dir, 0)
+    try:
+        r = world.run()
+    finally:
+        os.chmod(kind_dir, 0o755)
+    got = rows(r.stdout, "lesson-growth")
+    assert got["default"] == ("1", "1", "no")
+    assert got["levr"] == ("—", "—", "yes: its directory could not be read, so its lessons cannot all be counted")
+
+
+def test_lesson_growth_neutralizes_vault_names_in_its_heading(evil):
+    _lesson(evil.roots[EVIL_VAULT], "l", 1)
+    r = evil.run()
+    assert r.returncode == 0, r.stderr
+    heading = next(ln for ln in r.stdout.splitlines() if ln.startswith("lesson-growth — "))
+    assert "\x1b" not in r.stdout
+    assert "1 added (100%)" in heading
+
+
+def test_lesson_growth_result_is_plain_data_on_the_check_run(world, monkeypatch):
+    health = importlib.import_module("lore.cli.health")
+    _lesson(world.roots["trailhead"], "n", 1)
+    _lesson(world.roots["trailhead"], "o", 90)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(world.cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(world.state))
+    report = health.build_report()
+    (sec,) = [s for s in report.sections if s.check.name == "lesson-growth"]
+    assert sec.run.judged["trailhead"] == 2
+    assert [(f.vault, f.name) for f in sec.findings] == [("trailhead", "n")]
+
+
+# --- --repo: operator-passed repositories for missing-paths ---------------------------
+
+PASSED = "(passed with --repo)"
+NO_VAULT_REFUSAL = ("lore: cannot run the health report: "
+                    "--repo needs --vault to name the vault the repositories belong to")
+REPO_REMEDY = "pass a repository's working directory with --repo"
+CAMP_ABSENT_REASON = "no repository is known for this vault (camp is not installed)"
+
+
+def _both_paths(root, name="d"):
+    _put(root, "decision", name, body="`tools/lore/x.py` and `tools/lore/gone.py`\n")
+
+
+def _repo_run(world, *repo_args, vault="trailhead", cwd=None, env=None):
+    argv = ["health", "--vault", vault] if vault else ["health"]
+    for r in repo_args:
+        argv += ["--repo", str(r)]
+    return run_cli(argv, vault=world.roots["default"], state_dir=world.state, cwd=cwd,
+                   env_extra={"XDG_CONFIG_HOME": str(world.cfg), **(env or {})})
+
+
+def _camp_absent(monkeypatch):
+    layers = importlib.import_module("lore.vault.layers")
+
+    def gone():
+        raise ImportError("no camp")
+
+    monkeypatch.setattr(layers, "_import_camp_groups", gone)
+
+
+def test_a_passed_repository_serves_a_vault_camp_does_not_bind_and_its_lines_say_so(mp, world):
+    repo = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    _both_paths(world.roots["trailhead"])
+    r = _repo_run(world, repo)
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout, "missing-paths")["trailhead"] == ("1", "1", "no")
+    assert group(r.stdout, "missing-paths") == [
+        "missing-paths — 1 finding, oldest first",
+        f"  trailhead: repository {mp.where('alpha')} {PASSED}: origin/main, no fetch recorded",
+        f"  trailhead/decision/d  2026-03-01  body line 1: `tools/lore/gone.py` {MISSING_TAIL}",
+        MP_ACTION]
+
+
+def test_the_same_vault_without_repo_is_skipped_with_the_camp_reason(mp, world):
+    mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    r = world.run("--vault", "trailhead")
+    assert rows(r.stdout, "missing-paths")["trailhead"] == ("—", "—", "yes: " + UNBOUND_REASON)
+
+
+def test_a_passed_repository_serves_a_vault_when_camp_is_absent(mp, world, monkeypatch):
+    repo = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    _both_paths(world.roots["trailhead"])
+    _camp_absent(monkeypatch)
+    skipped = world.run("--vault", "trailhead")
+    assert rows(skipped.stdout, "missing-paths")["trailhead"] == ("—", "—", "yes: " + CAMP_ABSENT_REASON)
+    r = _repo_run(world, repo)
+    assert rows(r.stdout, "missing-paths")["trailhead"] == ("1", "1", "no")
+    assert _repo_lines(r.stdout) == [
+        f"  trailhead: repository {mp.where('alpha')} {PASSED}: origin/main, no fetch recorded"]
+
+
+def test_a_vault_camp_binds_uses_camps_repository_and_says_the_passed_paths_were_not_used(mp, world):
+    camp_repo = mp.repo("camp-one", {"tools/lore/x.py": "x\n"})
+    passed = mp.repo("passed-one", {"tools/lore/x.py": "x\n", "tools/lore/gone.py": "g\n"})
+    mp.bind("g", ["trailhead"], [camp_repo])
+    _both_paths(world.roots["trailhead"])
+    r = _repo_run(world, passed)
+    assert group(r.stdout, "missing-paths") == [
+        "missing-paths — 1 finding, oldest first",
+        "  trailhead: --repo ignored: camp binds this vault's repositories",
+        f"  trailhead: repository {mp.where('camp-one')}: origin/main, no fetch recorded",
+        f"  trailhead/decision/d  2026-03-01  body line 1: `tools/lore/gone.py` {MISSING_TAIL}",
+        MP_ACTION]
+    assert PASSED not in r.stdout and "passed-one" not in r.stdout
+
+
+def test_a_passed_path_that_does_not_exist_gives_the_repo_remedy_and_its_own_distinction(mp, world):
+    r = _repo_run(world, world.tmp_path / "nowhere")
+    where = str((world.tmp_path / "nowhere").resolve())
+    assert rows(r.stdout, "missing-paths")["trailhead"] == (
+        "—", "—", f"yes: repository {where} could not be read, so no path can be confirmed missing; "
+                  f"{REPO_REMEDY}")
+    assert _repo_lines(r.stdout) == [
+        f"  trailhead: repository {where} {PASSED}: could not be read (its directory does not exist)"]
+
+
+def test_a_passed_path_that_is_not_a_repository_gives_the_repo_remedy_and_its_own_distinction(mp, world):
+    plain = world.tmp_path / "plain"
+    plain.mkdir()
+    r = _repo_run(world, plain)
+    assert rows(r.stdout, "missing-paths")["trailhead"][2] == (
+        f"yes: repository {plain.resolve()} could not be read, so no path can be confirmed missing; "
+        f"{REPO_REMEDY}")
+    assert _repo_lines(r.stdout) == [
+        f"  trailhead: repository {plain.resolve()} {PASSED}: could not be read (it is not a git repository)"]
+
+
+def test_one_good_and_one_bad_passed_path_skip_the_vault(mp, world):
+    good = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    _both_paths(world.roots["trailhead"])
+    bad = world.tmp_path / "nowhere"
+    r = _repo_run(world, good, bad)
+    assert rows(r.stdout, "missing-paths")["trailhead"][2].startswith("yes: repository ")
+    assert _mp_findings(r.stdout) == []
+    assert len(_repo_lines(r.stdout)) == 2
+
+
+def test_repo_without_vault_is_refused_on_stderr_with_exit_one(world):
+    r = _repo_run(world, world.tmp_path, vault=None)
+    assert (r.returncode, r.stdout, r.stderr) == (1, "", NO_VAULT_REFUSAL + "\n")
+
+
+def test_repo_without_vault_scans_nothing(world, monkeypatch):
+    health = importlib.import_module("lore.cli.health")
+    scans = []
+    monkeypatch.setattr(health, "_scan_vault", lambda *a, **k: scans.append(a))
+    _repo_run(world, world.tmp_path, vault=None)
+    assert scans == []
+
+
+def test_a_passed_path_starting_with_a_dash_reaches_git_as_a_path_and_reads_normally(mp, world):
+    mp.repo("-dashed", {"tools/lore/x.py": "x\n"})
+    _both_paths(world.roots["trailhead"])
+    cwd = world.tmp_path / "repos"
+    r = run_cli(["health", "--vault", "trailhead", "--repo=-dashed"], vault=world.roots["default"],
+                state_dir=world.state, cwd=cwd, env_extra={"XDG_CONFIG_HOME": str(world.cfg)})
+    assert r.returncode == 0, r.stderr
+    assert _repo_lines(r.stdout) == [
+        f"  trailhead: repository {mp.where('-dashed')} {PASSED}: origin/main, no fetch recorded"]
+    assert len(_mp_findings(r.stdout)) == 1
+
+
+def test_a_quoted_tilde_path_is_expanded_and_a_missing_relative_path_shows_its_absolute_form(mp, world):
+    home = world.tmp_path / "home"
+    (home / "x").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(home / "x")], check=True)
+    build_history(home / "x", [{"id": "c", "branch": "main", "files": {"tools/lore/x.py": "x\n"}}])
+    r = _repo_run(world, "~/x", env={"HOME": str(home)})
+    assert _repo_lines(r.stdout)[0].startswith(f"  trailhead: repository {(home / 'x').resolve()} {PASSED}: ")
+    assert "~" not in _repo_lines(r.stdout)[0]
+    cwd = world.tmp_path / "work"
+    cwd.mkdir()
+    r = _repo_run(world, "sub/missing", cwd=cwd)
+    assert str((cwd / "sub" / "missing").resolve()) in rows(r.stdout, "missing-paths")["trailhead"][2]
+
+
+def test_a_passed_path_with_a_control_character_or_an_ansi_sequence_is_escaped(mp, world):
+    r = _repo_run(world, world.tmp_path / "gone\x1b[2Jrepo\n\x07bell")
+    assert "\x1b" not in r.stdout and "\x07" not in r.stdout
+    shown = _repo_lines(r.stdout)
+    assert len(shown) == 1 and "gone\\x1b[2Jrepo\\n\\x07bell" in shown[0]
+
+
+def test_a_passed_repository_that_plants_commands_in_its_config_is_read_and_the_canary_never_runs(mp, world):
+    repo = mp.repo("hostile", {"tools/lore/x.py": "x\n"})
+    sentinel = world.tmp_path / "canary-ran"
+    script = world.tmp_path / "canary.sh"
+    script.write_text(f"#!/bin/sh\necho ran >> {sentinel}\nexit 0\n")
+    script.chmod(0o755)
+    with (repo / ".git" / "config").open("a") as cfg:
+        cfg.write(f"[core]\n\tfsmonitor = {script}\n\tpager = {script}\n\talternateRefsCommand = {script}\n")
+    subprocess.run(["git", "-C", str(repo), "status", "--porcelain"], capture_output=True)
+    assert sentinel.exists(), "the canary must fire for a command that honours it"
+    sentinel.unlink()
+    _both_paths(world.roots["trailhead"])
+    r = _repo_run(world, repo)
+    assert rows(r.stdout, "missing-paths")["trailhead"] == ("1", "1", "no")
+    assert not sentinel.exists()
+
+
+def test_a_check_that_raises_memory_error_is_errored_while_the_others_render(mp, world, monkeypatch):
+    mp.all_to(mp.repo("alpha", {"tools/lore/x.py": "x\n"}))
+    paths = importlib.import_module("lore.health.paths")
+
+    def oom(*a, **k):
+        raise MemoryError
+
+    monkeypatch.setattr(paths, "check_missing_paths", oom)
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    for v in VAULTS:
+        assert rows(r.stdout, "missing-paths")[v] == ("—", "—", "errored: MemoryError")
+        assert rows(r.stdout, "dangling-links")[v][2] == "no"
+    assert group(r.stdout, "missing-paths") == ["missing-paths — errored: MemoryError."]
+    assert group(r.stdout, "dangling-links")[0] == "dangling-links — no findings."
+
+
+def test_the_report_keeps_which_paths_were_passed_and_whether_they_were_used_on_the_repository_view(
+        mp, world, monkeypatch):
+    health = importlib.import_module("lore.cli.health")
+    repos = importlib.import_module("lore.health.repos")
+    _health_env(world, monkeypatch)
+    a = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    b = mp.repo("beta", {"tools/lore/x.py": "x\n"})
+    used = health.build_report("trailhead", repo_paths=[str(a), str(b), str(a)]).ctx.repos["trailhead"]
+    assert isinstance(used, repos.RepositoryView)
+    assert (used.passed, used.used) == ((a.resolve(), b.resolve()), True)
+    assert [r.root for r in used] == [a.resolve(), b.resolve()]
+    mp.bind("g", ["trailhead"], [b])
+    ignored = health.build_report("trailhead", repo_paths=[str(a)]).ctx.repos["trailhead"]
+    assert (ignored.passed, ignored.used) == ((a.resolve(),), False)
+    assert [r.root for r in ignored] == [b.resolve()]
+    assert health.build_report("trailhead").ctx.repos["trailhead"].__class__ is tuple
+
+
+# --- characterization: every check's text lines and distill-queue's lines -------
+
+CHAR_NOW = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc)
+
+
+def _characterization_world(world, mp):
+    """One vault set holding every line shape each check and ``lore distill-queue`` prints."""
+    d, t, lv = world.roots["default"], world.roots["trailhead"], world.roots["levr"]
+    def stamp(days):
+        return (CHAR_NOW - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    mp.all_to(mp.repo("alpha", {"tools/lore/x.py": "x\n"}))
+    # dangling-links: unresolved related edge, a bad wikilink and a bad related entry
+    _put(d, "decision", "uses-gone", updated="2026-03-02T00:00:00Z", related={"decision": ["gone-one"]})
+    _put(d, "lesson", "wl", updated="2026-03-03T00:00:00Z", body="see [[nowhere-wiki]]\n[[Bad Name]]\n")
+    _put(t, "lesson", "bad-rel", updated="2026-03-04T00:00:00Z", related={"spec": ["bad name!"]})
+    _put(lv, "lesson", "Bad Name", updated="2026-03-05T00:00:00Z", related={"lesson": ["gone-two"]})
+    # retired-links: dropped, superseded with a successor, superseded with no successor, and linking back
+    _put(d, "decision", "dropped-d", status="dropped")
+    _put(d, "decision", "uses-dropped", updated="2026-03-06T00:00:00Z", related={"decision": ["dropped-d"]})
+    _put(d, "decision", "sup-old", status="superseded")
+    _put(d, "adr", "sup-new", supersedes=["decision/sup-old"])
+    _put(d, "decision", "uses-sup", updated="2026-03-07T00:00:00Z", related={"decision": ["sup-old"]})
+    _put(t, "decision", "lone-old", status="superseded", related={"adr": ["src"]})
+    _put(t, "adr", "src", updated="2026-03-08T00:00:00Z", related={"decision": ["lone-old"]})
+    # stale-tasks: aged, undated, tied to a retired spec, and a name shared by two vaults
+    _put(d, "task", "aged", status="open", updated=stamp(60))
+    _put(t, "task", "undated", status="open", updated=None)
+    _put(d, "spec", "dead-spec", status="dropped")
+    _put(d, "task", "tied", status="open", updated=stamp(2), related={"spec": ["dead-spec"]})
+    for v in (d, t):
+        _put(v, "task", "shared", status="open", updated=stamp(61))
+    # missing-paths: a body line and a related file
+    _put(d, "decision", "names-gone", updated="2026-03-09T00:00:00Z", body="see `tools/lore/gone.py`\n")
+    _put(t, "adr", "names-file", updated="2026-03-10T00:00:00Z",
+         **{"related-files-or-folders": ["tools/lore/x.py", "tools/lore/gone2.py"]})
+    # distill-queue: one waiting spec per reason shape, and a deferred one
+    _put(d, "spec", "waits", status="ready", updated="2026-02-01T00:00:00Z", labels={"craft/slice-loop": "complete"})
+    _put(d, "task", "t-waits", status="open", related={"spec": ["waits"]})
+    _put(t, "adr", "drafty", status="draft")
+    _put(t, "spec", "adr-draft", status="planned", updated="2026-02-02T00:00:00Z", related={"adr": ["drafty"]})
+    _put(t, "task", "t-adr-draft", status="open", related={"spec": ["adr-draft"]})
+    _put(t, "spec", "alone", status="complete", updated="2026-02-03T00:00:00Z")
+    # lesson-growth: one lesson inside the window and one outside, per vault
+    for v, n in ((d, "d"), (t, "t")):
+        _put(v, "lesson", f"{n}-new", labels=LABEL_CHAR, **{"created-at": stamp(5)})
+        _put(v, "lesson", f"{n}-old", labels=LABEL_CHAR, **{"created-at": stamp(90)})
+
+
+LABEL_CHAR = {"craft/dispatch-lesson": "executor"}
+
+
+def _characterized(world, mp, monkeypatch, tmp_path):
+    health = importlib.import_module("lore.cli.health")
+    _characterization_world(world, mp)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(world.cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(world.state))
+    text = "\n".join(health.render(health.build_report(now=CHAR_NOW), None, None))
+    queue = _queue_cli(world)
+    assert queue.returncode == 0, queue.stderr
+    def scrub(s):
+        return s.replace(str(tmp_path.resolve()), "<tmp>")
+
+    return scrub(text).splitlines(), scrub(queue.stdout).splitlines()
+
+
+CHAR_HEALTH = """\
+lore health — 3 vaults
+
+vault      check           records  findings  skipped
+default    dangling-links  16       3         no
+default    retired-links   9        2         no
+default    stale-tasks     4        4         no
+default    missing-paths   5        1         no
+default    distill-queue   2        1         no
+default    lesson-growth   2        1         no
+trailhead  dangling-links  12       1         no
+trailhead  retired-links   5        1         no
+trailhead  stale-tasks     3        3         no
+trailhead  missing-paths   2        1         no
+trailhead  distill-queue   2        1         no
+trailhead  lesson-growth   2        1         no
+levr       dangling-links  1        1         no
+levr       retired-links   0        0         no
+levr       stale-tasks     0        0         no
+levr       missing-paths   0        0         no
+levr       distill-queue   0        0         no
+levr       lesson-growth   0        0         no
+
+Could not confirm the count against the index: no index found. 28 records the index would hold (sessions included).
+
+dangling-links — 5 findings, oldest first
+  default/decision/uses-gone  2026-03-02  related decision → decision/gone-one: not found in any vault
+  default/lesson/wl  2026-03-03  wikilink → nowhere-wiki: not found in any vault
+  default/lesson/wl  2026-03-03  wikilink → malformed reference on body line 2: not shaped like a record id
+  trailhead/lesson/bad-rel  2026-03-04  related spec → malformed reference at entry 1: not shaped like a record id
+  levr/lesson/ (a record whose name is not a valid record id)  2026-03-05  related lesson → lesson/gone-two: not found in any vault
+Act on these with /lore:correct: point the reference at the record that replaced its target, or remove it.
+
+retired-links — 3 findings, oldest first
+  default/decision/uses-dropped  2026-03-06  related decision → decision/dropped-d: dropped
+  default/decision/uses-sup  2026-03-07  related decision → decision/sup-old: superseded by adr/sup-new
+  trailhead/adr/src  2026-03-08  related decision → decision/lone-old: superseded, and no record supersedes it; it links back to this record, so if this record replaced it, record that: `lore record supersede decision/lone-old --by adr/src`
+Act on these with /lore:correct: point a superseded link at a named live successor; for a superseded record that links back, run the lore record supersede command shown; remove a link to a dropped record, or to one with no live successor, unless it still applies.
+
+stale-tasks — 7 findings, oldest first (window: 30 days): 5 stale on age, 1 tied to a retired spec, 1 undated
+  trailhead/task/undated  undated  open  no readable last-updated time
+  default/task/t-waits  2026-03-01  open  last updated 269 days ago
+  trailhead/task/t-adr-draft  2026-03-01  open  last updated 269 days ago
+  default/task/shared  2026-09-25  open  last updated 61 days ago; a task of this name is also in vault trailhead; to drop this one, run `lore record update task/shared --status dropped --diff --vault default`
+  trailhead/task/shared  2026-09-25  open  last updated 61 days ago; a task of this name is also in vault default; to drop this one, run `lore record update task/shared --status dropped --diff --vault trailhead`
+  default/task/aged  2026-09-26  open  last updated 60 days ago
+  default/task/tied  2026-11-23  open  linked to spec/dead-spec, which is dropped
+Act on these: if the work already landed, mark the task done; if it still applies, resume it with /craft:execute; if it was abandoned, drop it with a note saying why (lore record update task/<name> --status dropped --diff). The id is task/<name>, without the vault prefix.
+
+missing-paths — 2 findings, oldest first
+  default: repository <tmp>/repos/alpha: origin/main, no fetch recorded
+  trailhead: repository <tmp>/repos/alpha: origin/main, no fetch recorded
+  levr: repository <tmp>/repos/alpha: origin/main, no fetch recorded
+  default/decision/names-gone  2026-03-09  body line 1: `tools/lore/gone.py` is on no repository's default branch
+  trailhead/adr/names-file  2026-03-10  related file 2: `tools/lore/gone2.py` is on no repository's default branch
+Act on these with /lore:correct: point the record at where the code now lives, or, if the feature it describes was removed, drop or supersede the record. If a repository line above is old, fetch it first; a path added on a branch not yet merged clears once it merges.
+
+distill-queue — 2 findings, oldest first (1 deferred: no linked task; list them with lore distill-queue and distill each with /craft:distill spec/<name>)
+  default/spec/waits  2026-02-01  ready  slice loop complete, not yet distilled
+  trailhead/spec/adr-draft  2026-02-02  planned  planned, not yet distilled; its ADR is still draft
+Act on these with /craft:distill: a sweep takes every waiting spec, including any not shown; /craft:distill spec/<name> takes one. The id is spec/<name>, without the vault prefix.
+
+lesson-growth — 2 findings, oldest first (window: 30 days): default 2 lessons, 1 added (50%); trailhead 2 lessons, 1 added (50%); levr 0 lessons, 0 added
+  default/lesson/d-new  2026-11-20  added 5 days ago
+  trailhead/lesson/t-new  2026-11-20  added 5 days ago
+These are informational, not problems to fix. If lessons pile up faster than they are folded, run /craft:consolidate: it merges lessons that prevent the same failure.
+"""  # noqa: E501 -- golden report text, wrapping would change the pinned output
+
+CHAR_QUEUE = """\
+lore distill-queue — 2 waiting, 1 deferred
+
+waiting:
+  default/spec/waits  2026-02-01  ready  slice loop complete, not yet distilled
+  trailhead/spec/adr-draft  2026-02-02  planned  planned, not yet distilled; its ADR is still draft
+
+deferred, no linked task (distill each by target):
+  trailhead/spec/alone  2026-02-03  complete  complete, never distilled
+"""
+
+
+def test_characterization_pins_every_check_line_and_the_distill_queue_lines(world, mp, monkeypatch, tmp_path):
+    health_lines, queue_lines = _characterized(world, mp, monkeypatch, tmp_path)
+    assert health_lines == CHAR_HEALTH.splitlines()
+    assert queue_lines == CHAR_QUEUE.splitlines()
+
+
+# --- --json ------------------------------------------------------------------------
+
+
+def _json(world, *args):
+    r = world.run("--json", *args)
+    assert r.returncode == 0, r.stderr
+    assert r.stderr == ""
+    return json.loads(r.stdout), r
+
+
+def _check(doc, name):
+    (found,) = [c for c in doc["checks"] if c["name"] == name]
+    return found
+
+
+def test_a_clean_run_has_every_check_ran_with_no_findings(world, mp):
+    mp.all_to(mp.repo("alpha", {"tools/lore/x.py": "x\n"}))
+    _put(world.roots["default"], "decision", "fine")
+    doc, _ = _json(world)
+    assert doc["format"] == 1
+    assert doc["vaults"] == ["default", "trailhead", "levr"]
+    assert (doc["configured"], doc["window_days"]) == (3, 30)
+    assert [c["name"] for c in doc["checks"]] == list(CHECKS)
+    for c in doc["checks"]:
+        assert (c["status"], c["total"], c["shown"], c["findings"], c["skipped"], c["error"]) == (
+            "ran", 0, 0, [], {}, None), c["name"]
+        assert c["action"] is None
+    assert {(r["vault"], r["check"]): (r["findings"], r["skipped"], r["error"]) for r in doc["summary"]} == {
+        (v, c): (0, None, None) for v in doc["vaults"] for c in CHECKS}
+    assert doc["unreadable"] == {} and doc["outside_root"] == {}
+    assert doc["index"]["status"] == "unconfirmed"
+
+
+def test_over_the_cap_total_is_true_and_shown_is_the_limit_oldest_first_and_all_shows_every_one(world):
+    for i in range(5):
+        _put(world.roots["default"], "task", f"t{i}", updated=f"2026-02-0{i + 1}T00:00:00Z",
+             related={"lesson": [f"gone-{i}"]})
+    doc, _ = _json(world, "--limit", "2")
+    c = _check(doc, "dangling-links")
+    assert (c["total"], c["shown"]) == (5, 2)
+    assert [f["name"] for f in c["findings"]] == ["t0", "t1"]
+    assert c["action"].startswith("Act on these with /lore:correct")
+    assert [r["findings"] for r in doc["summary"] if r["check"] == "dangling-links"
+            and r["vault"] == "default"] == [5]
+    doc, _ = _json(world, "--all")
+    c = _check(doc, "dangling-links")
+    assert (c["total"], c["shown"]) == (5, 5)
+    assert [f["name"] for f in c["findings"]] == [f"t{i}" for i in range(5)]
+
+
+def test_a_finding_carries_vault_kind_name_date_and_evidence_and_an_undated_one_has_a_null_date(world):
+    _put(world.roots["trailhead"], "task", "t", updated=None, related={"lesson": ["gone"]})
+    doc, _ = _json(world)
+    (f,) = _check(doc, "dangling-links")["findings"]
+    assert f == {"vault": "trailhead", "kind": "task", "name": "t", "date": None,
+                 "evidence": "related lesson → lesson/gone: not found in any vault"}
+
+
+def test_a_check_skipped_for_every_vault_has_null_counts_and_each_vaults_reason(world):
+    _put(world.roots["default"], "task", "d", related={"lesson": ["nowhere"]})
+    os.chmod(world.roots["levr"], 0)
+    try:
+        doc, r = _json(world)
+        table = rows(world.run().stdout)
+    finally:
+        os.chmod(world.roots["levr"], 0o755)
+    c = _check(doc, "dangling-links")
+    assert (c["status"], c["total"], c["shown"], c["findings"]) == ("skipped", None, None, [])
+    assert set(c["skipped"]) == {"default", "trailhead", "levr"}
+    for vault, reason in c["skipped"].items():
+        assert "yes: " + reason == table[vault][2], vault
+    assert {r["skipped"] for r in doc["summary"] if r["check"] == "dangling-links"} == set(c["skipped"].values())
+
+
+def test_a_check_skipped_for_some_vaults_is_ran_with_those_vaults_in_skipped_and_null_counts_on_their_rows(
+        world, mp):
+    mp.bind("g", ["trailhead"], [mp.repo("alpha", {"tools/lore/x.py": "x\n"})])
+    _decision_naming(world.roots["trailhead"], "d", "tools/lore/gone.py")
+    doc, _ = _json(world)
+    c = _check(doc, "missing-paths")
+    assert c["status"] == "ran"
+    assert set(c["skipped"]) == {"default", "levr"}
+    assert (c["total"], c["shown"]) == (1, 1)
+    summary = {r["vault"]: r for r in doc["summary"] if r["check"] == "missing-paths"}
+    assert (summary["default"]["records"], summary["default"]["findings"]) == (None, None)
+    assert summary["default"]["skipped"] == c["skipped"]["default"]
+    assert summary["trailhead"]["findings"] == 1 and summary["trailhead"]["skipped"] is None
+    assert [r["root"] for r in _vault_repos(doc, "trailhead")["roots"]] == [
+        str((mp.tmp_path / "repos" / "alpha").resolve())]
+
+
+def test_an_errored_check_has_its_error_type_and_the_others_are_intact(world, monkeypatch):
+    _put(world.roots["default"], "task", "d", related={"lesson": ["nowhere"]})
+
+    def boom(scans, selected, ctx):
+        raise RuntimeError("boom\nsecond line")
+
+    _with_checks(monkeypatch, "retired-links", boom)
+    doc, r = _json(world)
+    c = _check(doc, "retired-links")
+    assert (c["status"], c["error"], c["total"], c["shown"], c["findings"]) == (
+        "errored", "RuntimeError", None, None, [])
+    assert "boom" not in r.stdout
+    assert _check(doc, "dangling-links")["total"] == 1
+    assert {r["error"] for r in doc["summary"] if r["check"] == "retired-links"} == {"RuntimeError"}
+
+
+def test_an_unknown_vault_with_json_refuses_on_stderr_alone(world):
+    r = world.run("--json", "--vault", "nope")
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert len(r.stderr.splitlines()) == 1 and r.stderr.startswith("lore: ")
+
+
+def test_json_with_repo_and_no_vault_refuses_on_stderr_alone(world, tmp_path):
+    r = world.run("--json", "--repo", str(tmp_path))
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert r.stderr.startswith("lore: cannot run the health report: --repo needs --vault")
+
+
+def _vault_repos(doc, vault):
+    (entry,) = [v for v in _check(doc, "missing-paths")["repositories"] if v["vault"] == vault]
+    return entry
+
+
+def test_a_passed_repo_path_with_a_control_character_arrives_escaped_in_a_structured_entry(world, tmp_path):
+    r = world.run("--json", "--vault", "trailhead", "--repo", str(tmp_path / "re\x1bpo\ndir"))
+    assert r.returncode == 0, r.stderr
+    assert not [b for b in r.stdout.encode() if b < 0x20 and b not in b"\n "]
+    (entry,) = _vault_repos(json.loads(r.stdout), "trailhead")["roots"]
+    assert entry["root"].isprintable() and entry["root"].endswith("re\\x1bpo\\ndir")
+    assert entry["passed"] is True
+    assert entry["unreadable_reason"] == "missing"
+    assert (entry["branch"], entry["local"], entry["fetched_at"], entry["age_days"]) == (None, None, None, None)
+
+
+def test_a_camp_bound_vault_with_repo_lists_camps_repository_unpassed_and_the_set_aside_paths(world, mp):
+    camp_repo = mp.repo("camp-one", {"tools/lore/x.py": "x\n"})
+    passed = mp.repo("passed-one", {"tools/lore/x.py": "x\n"})
+    mp.bind("g", ["trailhead"], [camp_repo])
+    doc, _ = _json(world, "--vault", "trailhead", "--repo", str(passed))
+    entry = _vault_repos(doc, "trailhead")
+    assert entry["no_repositories_reason"] is None
+    assert entry["ignored_passed"] == [str(passed.resolve())]
+    (root,) = entry["roots"]
+    assert root["root"] == str(camp_repo.resolve())
+    assert (root["passed"], root["branch"], root["local"], root["unreadable_reason"]) == (False, "main", False, None)
+    assert (root["fetched_at"], root["age_days"]) == (None, None)
+
+
+def test_an_unbound_vault_served_by_repo_lists_the_passed_repository_as_passed_with_no_set_aside(world, mp):
+    passed = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    doc, _ = _json(world, "--vault", "trailhead", "--repo", str(passed))
+    entry = _vault_repos(doc, "trailhead")
+    assert entry["ignored_passed"] == [] and entry["no_repositories_reason"] is None
+    (root,) = entry["roots"]
+    assert (root["root"], root["passed"], root["branch"], root["unreadable_reason"]) == (
+        str(passed.resolve()), True, "main", None)
+
+
+def test_a_repository_fetched_some_days_ago_carries_its_fetch_time_and_age(world, mp, monkeypatch):
+    repo = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    mp.bind("g", ["trailhead"], [repo])
+    fetched = datetime.now(timezone.utc) - timedelta(days=5, hours=2)
+    (repo / ".git" / "FETCH_HEAD").write_text("")
+    os.utime(repo / ".git" / "FETCH_HEAD", (fetched.timestamp(), fetched.timestamp()))
+    doc, _ = _json(world, "--vault", "trailhead")
+    (root,) = _vault_repos(doc, "trailhead")["roots"]
+    assert root["age_days"] == 5
+    assert datetime.fromisoformat(root["fetched_at"]) == datetime.fromtimestamp(fetched.timestamp(), timezone.utc)
+
+
+def test_a_vault_with_no_repositories_carries_its_reason_and_no_roots(world):
+    doc, _ = _json(world, "--vault", "trailhead")
+    entry = _vault_repos(doc, "trailhead")
+    assert entry["roots"] == [] and entry["ignored_passed"] == []
+    assert entry["no_repositories_reason"] == "unbound"
+
+
+def _hostile_stale(**kw):
+    stale_mod = importlib.import_module("lore.health.stale")
+    health = importlib.import_module("lore.cli.health")
+    f = stale_mod.Finding("default", "task", kw.get("name", "SECRETNAME\x1b[2J\nx"), "2026-09-01T00:00:00+00:00",
+                          kw.get("status", "open\x1b[31m\nINJECT é"), 60, False)
+    return health.CheckRun([f], {"default": 1})
+
+
+def _with_stale_run(monkeypatch, run):
+    health = importlib.import_module("lore.cli.health")
+    monkeypatch.setattr(health, "CHECKS", tuple(
+        replace(c, run=lambda scans, selected, ctx: run) if c.name == "stale-tasks" else c
+        for c in health.CHECKS))
+
+
+def test_untrusted_text_in_json_has_no_control_bytes_no_raw_non_ascii_and_a_bad_name_is_null(world, monkeypatch):
+    _with_stale_run(monkeypatch, _hostile_stale())
+    r = world.run("--json")
+    assert r.returncode == 0, r.stderr
+    raw = r.stdout.encode()
+    assert not [b for b in raw if b < 0x20 and b not in b"\n "]
+    assert all(b < 0x80 for b in raw)
+    assert "SECRETNAME" not in r.stdout
+    (f,) = _check(json.loads(r.stdout), "stale-tasks")["findings"]
+    assert f["name"] is None
+    assert f["evidence"].isprintable() and "INJECT" in f["evidence"] and "é" in f["evidence"]
+
+
+def test_a_non_ascii_character_arrives_as_a_json_escape_and_not_as_raw_bytes(world, monkeypatch):
+    _with_stale_run(monkeypatch, _hostile_stale(name="plain", status="open é"))
+    r = world.run("--json")
+    assert "\\u00e9" in r.stdout
+    assert all(b < 0x80 for b in r.stdout.encode())
+    (f,) = _check(json.loads(r.stdout), "stale-tasks")["findings"]
+    assert f["name"] == "plain" and "é" in f["evidence"]
+
+
+def test_a_long_wikilink_target_is_capped_with_an_ellipsis_in_both_forms_and_a_short_one_is_whole(world):
+    health = importlib.import_module("lore.cli.health")
+    long_name = "a" * 250
+    _put(world.roots["default"], "task", "long", related={"decision": [long_name]})
+    _put(world.roots["default"], "task", "short", related={"decision": ["b" * 40]})
+    doc, _ = _json(world)
+    ev = {f["name"]: f["evidence"] for f in _check(doc, "dangling-links")["findings"]}
+    room = health.MAX_EVIDENCE_FIELD - 1 - len("decision/")
+    capped = f"related decision → decision/{'a' * room}…: not found in any vault"
+    assert ev["long"] == capped
+    assert ev["short"] == f"related decision → decision/{'b' * 40}: not found in any vault"
+    text = world.run().stdout
+    assert f"  default/task/long  2026-03-01  {capped}" in text.splitlines()
+    assert long_name not in text
+
+
+def _json_world_evidence(world, mp, monkeypatch, tmp_path):
+    health = importlib.import_module("lore.cli.health")
+    _characterization_world(world, mp)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(world.cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(world.state))
+    report = health.build_report(now=CHAR_NOW)
+    return health, report, health.json_document(report, None), health.render(report, None, None)
+
+
+def _text_line_for(f):
+    ident = f"{f['vault']}/{f['kind']}/" + (f["name"] if f["name"] is not None
+                                            else " (a record whose name is not a valid record id)")
+    return f"  {ident}  {f['date'] or 'undated'}  {f['evidence']}"
+
+
+@pytest.mark.parametrize("name", CHECKS)
+def test_every_findings_text_line_is_its_identity_date_and_json_evidence(world, mp, monkeypatch, tmp_path, name):
+    health, report, doc, lines = _json_world_evidence(world, mp, monkeypatch, tmp_path)
+    c = _check(doc, name)
+    assert c["findings"] and c["total"] == len(c["findings"])
+    for f in c["findings"]:
+        assert _text_line_for(f) in lines, f
+    assert c["total"] == sum(r["findings"] for r in doc["summary"] if r["check"] == name)
+    group_lines = group("\n".join(lines), name)
+    assert len([ln for ln in group_lines if ln in {_text_line_for(f) for f in c["findings"]}]) == c["total"]
+
+
+@pytest.mark.parametrize("name", CHECKS)
+def test_changing_a_checks_evidence_function_changes_both_forms(world, mp, monkeypatch, tmp_path, name):
+    health = importlib.import_module("lore.cli.health")
+    monkeypatch.setattr(health, "CHECKS", tuple(
+        replace(c, evidence=lambda f: "SENTINEL-EVIDENCE") if c.name == name else c for c in health.CHECKS))
+    _, report, doc, lines = _json_world_evidence(world, mp, monkeypatch, tmp_path)
+    c = _check(doc, name)
+    assert c["findings"]
+    assert {f["evidence"] for f in c["findings"]} == {"SENTINEL-EVIDENCE"}
+    finding_lines = [ln for ln in group("\n".join(lines), name) if ln.startswith("  ") and ": repository" not in ln]
+    assert finding_lines and all(ln.endswith("  SENTINEL-EVIDENCE") for ln in finding_lines)
+
+
+@pytest.mark.parametrize("extra,capped", [(0, False), (1, True)])
+def test_a_target_of_exactly_the_cap_prints_whole_and_one_more_character_is_cut(world, extra, capped):
+    health = importlib.import_module("lore.cli.health")
+    name = "a" * (health.MAX_EVIDENCE_FIELD - len("decision/") + extra)
+    _put(world.roots["default"], "task", "t", related={"decision": [name]})
+    doc, _ = _json(world)
+    (f,) = _check(doc, "dangling-links")["findings"]
+    target = f["evidence"].split(" → ")[1].split(": ")[0]
+    assert target.endswith("…") is capped
+    assert len(target) == health.MAX_EVIDENCE_FIELD
+
+
+def _escape_session(world, tmp_path, vault):
+    outside = tmp_path / "elsewhere-s"
+    outside.mkdir(exist_ok=True)
+    (outside / "s.md").write_text("x")
+    (outside / "s.json").write_text("{}")
+    sess = world.roots[vault] / "session"
+    sess.mkdir(exist_ok=True)
+    (sess / "s1.md").symlink_to(outside / "s.md")
+    (sess / "s1.json").symlink_to(outside / "s.json")
+
+
+def test_a_skipped_row_names_the_real_cause_when_the_only_escape_is_of_a_kind_the_check_does_not_judge(world, tmp_path):
+    root = world.roots["trailhead"]
+    _put(root, "spec", "broken", status="planned")
+    (root / "spec" / "broken.json").write_text("not json")
+    _escape_session(world, tmp_path, "trailhead")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    reason = rows(r.stdout, "distill-queue")["trailhead"][2]
+    assert reason.startswith("yes:")
+    assert "outside its vault root" not in reason
+    assert "holds a spec or task record that could not be read" in reason
+
+
+@pytest.mark.parametrize("check,kind,extra", [
+    ("stale-tasks", "task", {"status": "open"}),
+    ("distill-queue", "spec", {"status": "planned"}),
+])
+def test_a_skipped_row_names_the_escape_when_the_escaping_record_is_of_a_kind_the_check_judges(
+    world, tmp_path, check, kind, extra
+):
+    outside = tmp_path / "elsewhere-j"
+    outside.mkdir()
+    _put(outside, kind, "hidden", **extra)
+    (world.roots["trailhead"] / kind).symlink_to(outside / kind, target_is_directory=True)
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout, check)["trailhead"][2] == "yes: records lie outside its vault root and were not read"
+
+
+def test_a_stale_task_whose_namesake_is_unreadable_in_another_vault_prints_the_vault_qualified_drop_command(world):
+    _put(world.roots["trailhead"], "task", "x", status="open", updated="2026-01-01T00:00:00Z")
+    _put(world.roots["default"], "task", "x", status="open", body="y" * (2 * 1024 * 1024))
+    r = world.run("--vault", "trailhead")
+    assert r.returncode == 0, r.stderr
+    (line,) = [ln for ln in group(r.stdout, "stale-tasks") if "task/x" in ln]
+    assert "a task of this name is also in vault default" in line
+    assert line.endswith("`lore record update task/x --status dropped --diff --vault trailhead`")
+
+
+UNCONFIRMED = "superseded, and no readable record supersedes it"
+
+
+def test_a_superseded_target_is_unconfirmed_and_gets_no_supersede_command_when_a_vault_holds_an_escape(world, tmp_path):
+    _links_back_world(world.roots["default"], target_related={"adr": ["src"]})
+    _escape_session(world, tmp_path, "levr")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert retired_lines(r.stdout) == [
+        f"  default/adr/src  2026-03-01  related decision → decision/old: {UNCONFIRMED}"]
+    doc, _ = _json(world)
+    (finding,) = _check(doc, "retired-links")["findings"]
+    assert finding["evidence"] == f"related decision → decision/old: {UNCONFIRMED}"
+    assert "lore record supersede" not in finding["evidence"]
+
+
+def test_a_superseded_target_with_no_escape_anywhere_keeps_its_wording_and_command_in_text_and_json(world):
+    _links_back_world(world.roots["default"], target_related={"adr": ["src"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {LINKS_BACK}: `lore record supersede decision/old --by adr/src`")
+    doc, _ = _json(world)
+    (finding,) = _check(doc, "retired-links")["findings"]
+    assert finding["evidence"].endswith(
+        f"{NO_SUCCESSOR}; {LINKS_BACK}: `lore record supersede decision/old --by adr/src`")

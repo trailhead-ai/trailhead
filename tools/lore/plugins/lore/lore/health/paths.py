@@ -45,7 +45,7 @@ repository without it, and a false missing path is worse than a visible skip.
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -111,7 +111,7 @@ def check_missing_paths(
             continue
         repositories: Sequence[Repository] = repos[scan.vault]  # type: ignore[assignment]
         top_level = frozenset().union(*(r.top_level for r in repositories))
-        tails = frozenset(t for r in repositories for p in r.paths for t in _tails(p))
+        tails = SuffixIndex(p for r in repositories for p in r.paths)
         judged = 0
         for record in scan.records:
             if record.kind not in JUDGED_KINDS or not is_live(record):
@@ -123,7 +123,7 @@ def check_missing_paths(
 
 
 def _skip(scan: VaultScan, view: str | Sequence[Repository | Unreadable] | None) -> VaultSkip | None:
-    if not scan.fully_read:
+    if not scan.readable_for(JUDGED_KINDS):
         return VaultSkip(NOT_FULLY_READ)
     if isinstance(view, str):
         return VaultSkip(view)
@@ -136,7 +136,7 @@ def _skip(scan: VaultScan, view: str | Sequence[Repository | Unreadable] | None)
 
 
 def _missing(
-    record: ScannedRecord, top_level: frozenset[str], tails: frozenset[str],
+    record: ScannedRecord, top_level: frozenset[str], tails: SuffixIndex,
     repositories: Sequence[Repository],
 ) -> list[MissingPath]:
     found: list[MissingPath] = []
@@ -146,19 +146,55 @@ def _missing(
         if bare is None or bare.split("/", 1)[0] not in top_level or bare in seen:
             continue
         seen.add(bare)
-        if bare not in tails and not any(r.contains(bare) for r in repositories):
+        if not tails.has_tail(bare) and not any(r.contains(bare) for r in repositories):
             found.append(MissingPath(record.vault, record.kind, record.name,
                                      record.updated_at, location, number, written))
     return found
 
 
-def _tails(path: str):
-    """*path* and each tail of it that starts at a directory boundary."""
-    yield path
-    start = path.find("/") + 1
-    while start:
-        yield path[start:]
-        start = path.find("/", start) + 1
+class SuffixIndex:
+    """Every path of a vault's repositories, answering "is this the tail of one?".
+
+    A path is stored once, under its last two segments, so memory grows with the
+    number of paths and not with their depth. A candidate of one or two segments is
+    answered by the key alone (an exact segment match is a directory boundary);
+    only a candidate of three or more is compared, and only against the paths that
+    share its last two segments, so a bucket of a shared basename is never scanned
+    for a candidate whose parent segment differs. ``comparisons`` counts those
+    comparisons and ``entries`` the paths held.
+    """
+
+    def __init__(self, paths: Iterable[str]):
+        self._by_last_two: dict[tuple[str, str | None], set[str]] = {}
+        self._basenames: set[str] = set()
+        self.comparisons = 0
+        for path in paths:
+            head, _, last = path.rpartition("/")
+            parent = head.rpartition("/")[2] if head else None
+            self._by_last_two.setdefault((last, parent), set()).add(path)
+            self._basenames.add(last)
+
+    @property
+    def entries(self) -> int:
+        return sum(len(bucket) for bucket in self._by_last_two.values())
+
+    def has_tail(self, candidate: str) -> bool:
+        """True when *candidate* is a path, or the tail of one from a directory boundary."""
+        if "/" not in candidate:
+            return candidate in self._basenames
+        head, _, last = candidate.rpartition("/")
+        parent, nested = head.rpartition("/")[2], "/" in head
+        bucket = self._by_last_two.get((last, parent))
+        if not bucket:
+            return False
+        if not nested:
+            return True
+        suffix = "/" + candidate
+        for path in bucket:
+            self.comparisons += 1
+            if path == candidate or path.endswith(suffix):
+                return True
+        return False
 
 
 def _candidates(record: ScannedRecord):

@@ -1,6 +1,6 @@
 """``lore distill-queue`` — the specs waiting to be distilled, and the deferred ones (read-only).
 
-Usage: ``lore distill-queue`` (no flags but ``--help``). Reads every configured
+Usage: ``lore distill-queue [--max-scan-mib N]``. Reads every configured
 vault and prints what :func:`lore.health.distill_queue.build_distill_queue`
 decides; that module states the rule, this one only prints it.
 
@@ -17,8 +17,9 @@ spec name that is not a valid record id is replaced by a fixed phrase and never 
 **Exit codes.** 0 on success, with or without specs waiting. 1 with one ``lore:``
 stderr line and nothing on stdout when the queue cannot be built: a vault was not
 fully read, or holds a spec or task record that could not be read (the line names the
-vault and the way on: repair or remove it, or distill one spec by name), the
-configuration cannot be read, or anything fails unexpectedly.
+vault, each such record, and the way on: repair or remove it, or distill one spec by name),
+a vault's records exceed the scan budget (the line names the size and ``--max-scan-mib``),
+the configuration cannot be read, or anything fails unexpectedly.
 A caller treats any non-zero exit, and any stdout whose first line does not start
 ``lore distill-queue — ``, as a refusal and never as an empty queue.
 
@@ -31,7 +32,7 @@ import sys
 
 from ..health import distill_queue as queue_mod
 from ..health import scan as scan_mod
-from .health import _distill_line, _emit, _safe
+from .health import _distill_line, _emit, _record_id, _safe, add_max_scan_mib, budget_exceeded, scan_budget
 
 HEADER = "lore distill-queue — "
 DEFERRED_HEADING = "deferred, no linked task (distill each by target):"
@@ -54,28 +55,51 @@ def render(queue: queue_mod.DistillQueue) -> list[str]:
     return lines
 
 
+MAX_NAMED_RECORDS = 10
+
+
+def _named(skipped: queue_mod.DistillSkipped) -> str:
+    named = [_record_id(v, k, n) if n is not None else f"{_safe(v)}/{_safe(k)}/"
+             for v, k, n in skipped.records[:MAX_NAMED_RECORDS]]
+    more = len(skipped.records) - MAX_NAMED_RECORDS
+    if more > 0:
+        named.append(f"and {more} more")
+    return f" ({', '.join(named)})" if named else ""
+
+
 def _refusal(skipped: queue_mod.DistillSkipped, scans) -> str:
     by_name = {s.vault: s for s in scans}
+    over = tuple(v for v in skipped.vaults if by_name[v].unreadable_reason == scan_mod.REASON_OVER_BUDGET)
+    others = tuple(v for v in skipped.vaults if v not in over)
     causes = []
-    if skipped.vaults:
-        names = ", ".join(_safe(v) for v in skipped.vaults)
-        noun = "vault" if len(skipped.vaults) == 1 else "vaults"
-        unreadable = all(by_name[v].unreadable_reason is not None for v in skipped.vaults)
+    for v in over:
+        causes.append(f"vault {_safe(v)}'s " + budget_exceeded(by_name[v]))
+    if others:
+        names = ", ".join(_safe(v) for v in others)
+        noun = "vault" if len(others) == 1 else "vaults"
+        unreadable = all(by_name[v].unreadable_reason is not None for v in others)
         state = "could not be read" if unreadable else "could not be fully read"
         causes.append(f"{noun} {names} {state}")
     if skipped.unreadable_records:
         names = ", ".join(_safe(v) for v in skipped.unreadable_records)
         noun, verb = ("vault", "holds") if len(skipped.unreadable_records) == 1 else ("vaults", "hold")
         causes.append(f"{noun} {names} {verb} a spec or task record that could not be read")
-    fallback = (_FALLBACK if not skipped.unreadable_records
-                else _FALLBACK_RECORD if not skipped.vaults else _FALLBACK_BOTH)
-    return f"lore: {' and '.join(causes)}, so the distill queue is refused rather than built partial; {fallback}"
+    text = f"{' and '.join(causes)}{_named(skipped)}"
+    remedies = []
+    if others or skipped.unreadable_records:
+        remedies.append(_FALLBACK if not skipped.unreadable_records
+                        else _FALLBACK_RECORD if not others else _FALLBACK_BOTH)
+    if over:
+        remedies.append("pass --max-scan-mib to raise it")
+    return f"lore: {text}, so the distill queue is refused rather than built partial; {'; '.join(remedies)}"
 
 
 def cmd_distill_queue(args) -> int:
     """Print the distill queue; see the module docstring for the exit contract."""
     try:
-        scans = [_scan_vault(name, root, probe_index=False) for name, root in scan_mod.resolve_vaults()]
+        budget = scan_budget(args.max_scan_mib)
+        scans = [_scan_vault(name, root, probe_index=False, max_bytes=budget)
+                 for name, root in scan_mod.resolve_vaults()]
         result = queue_mod.build_distill_queue(scans)
         if isinstance(result, queue_mod.DistillSkipped):
             _emit([_refusal(result, scans)], sys.stderr)
@@ -104,4 +128,5 @@ def add_distill_queue_subparser(sub) -> None:
             "'lore distill-queue — ', as a refusal, never an empty queue. Read-only."
         ),
     )
+    add_max_scan_mib(p)
     p.set_defaults(func=cmd_distill_queue)

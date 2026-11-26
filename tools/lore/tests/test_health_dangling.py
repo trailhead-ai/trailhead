@@ -432,6 +432,17 @@ def test_target_existing_only_as_unreadable_record_in_another_vault_is_not_repor
     assert run([a, b]).findings == []
 
 
+def test_an_oversize_body_record_kept_for_its_sidecar_still_counts_as_unreadable_to_this_check():
+    def scan(with_sidecar):
+        a = vault("a", rec("a", "lesson", "src", {}, "[[adr/x]]"))
+        a.unreadable.append(model.UnreadableRecord("a", "adr", "x", "oversize"))
+        if with_sidecar:
+            a.sidecar_only.append(model.SidecarOnlyRecord("a", "adr", "x", {"status": "active"}))
+        return a
+
+    assert run([scan(True)]).findings == run([scan(False)]).findings == []
+
+
 def test_other_kind_that_is_unreadable_is_not_named():
     a = vault("a", rec("a", "lesson", "src", {}, "[[adr/x]]"))
     a.unreadable.append(model.UnreadableRecord("a", "decision", "x", "oversize"))
@@ -453,3 +464,63 @@ def test_including_sessions_counts_them_as_judged():
     a = vault("a", rec("a", "session", "s1"), rec("a", "lesson", "l1"))
     assert run([a]).judged == {"a": 1}
     assert run([a], include_sessions=True).judged == {"a": 2}
+
+
+def _escaped(vault_name, kind, name):
+    return model.EscapedRecord(vault_name, kind, name)
+
+
+def test_an_escaping_record_named_as_a_link_target_is_not_reported_dangling():
+    linker = rec("a", "task", "t", {"related": {"session": ["s"]}})
+    res = run([vault("a", linker, skipped_escaping=1, escaped=[_escaped("a", "session", "s")])])
+    assert isinstance(res, dangling.DanglingResult)
+    assert found(res) == []
+
+
+def test_a_target_that_is_not_the_escaping_record_is_still_reported_dangling():
+    linker = rec("a", "task", "t", {"related": {"session": ["other"]}})
+    res = run([vault("a", linker, skipped_escaping=1, escaped=[_escaped("a", "session", "s")])])
+    assert found(res) == [("t", "related session", "session/other")]
+
+
+def test_an_escaping_kind_directory_makes_every_name_of_that_kind_an_unknown_target():
+    kinds = model.VaultScan("a", "/nowhere/a", skipped_escaping=1,
+                            escaped=[_escaped("a", "session", None)])
+    kinds.records.append(rec("a", "task", "t", {"related": {"session": ["whatever"]}}))
+    assert found(run([kinds])) == []
+
+
+def test_an_escaping_record_of_a_kind_the_check_judges_skips_the_check():
+    linker = rec("a", "task", "t", {"related": {"lesson": ["gone"]}})
+    res = run([vault("a", linker, skipped_escaping=1, escaped=[_escaped("a", "decision", "d")])])
+    assert isinstance(res, dangling.DanglingResult)
+    assert res.skipped == ("a",) and res.findings == [] and res.judged == {}
+
+
+def test_an_escaping_session_record_does_not_skip_the_check_unless_sessions_are_judged():
+    linker = rec("a", "task", "t", {"related": {"lesson": ["gone"]}})
+    scan = vault("a", linker, skipped_escaping=1, escaped=[_escaped("a", "session", "s")])
+    assert isinstance(run([scan]), dangling.DanglingResult)
+    assert run([scan], include_sessions=True).skipped == ("a",)
+
+
+def test_an_escaping_kind_directory_skips_that_vault_only_and_the_others_still_report():
+    holder = vault("a", rec("a", "lesson", "mine", {}, "[[gone-a]]"),
+                   skipped_escaping=1, escaped=[_escaped("a", "decision", None)])
+    other = vault("b", rec("b", "lesson", "src", {}, "[[lesson/gone-b]] and [[decision/hidden]]"))
+    res = run([holder, other])
+    assert isinstance(res, dangling.DanglingResult)
+    assert res.skipped == ("a",)
+    assert res.judged == {"b": 1}
+    assert [(f.vault, f.target) for f in res.findings] == [("b", "lesson/gone-b")]
+
+
+def test_a_vault_holding_an_escape_is_named_skipped_even_when_not_selected():
+    holder = vault("a", skipped_escaping=1, escaped=[_escaped("a", "decision", None)])
+    res = run([holder, vault("b")], selected={"b"})
+    assert res.skipped == ("a",) and res.judged == {"b": 0}
+
+
+def test_an_unattributed_escape_still_skips_the_whole_check():
+    res = run([vault("a", skipped_escaping=1, escaped=[]), vault("b")])
+    assert res == dangling.DanglingSkipped(("a",))

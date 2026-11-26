@@ -10,6 +10,7 @@ are not strings); ``parent`` has none.
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
@@ -52,10 +53,15 @@ def extract_wikilink_lines(body: str) -> list[tuple[str, int]]:
     without dropping a newline, so the count is unaffected by it.
     """
     prose = _strip_inline_code(_strip_block_code(body))
+    newlines = _newline_offsets(prose)
     return [
-        (re.split(r"[|#]", m.group(1), maxsplit=1)[0], prose.count("\n", 0, m.start()) + 1)
+        (re.split(r"[|#]", m.group(1), maxsplit=1)[0], bisect_left(newlines, m.start()) + 1)
         for m in _WIKILINK_RE.finditer(prose)
     ]
+
+
+def _newline_offsets(text: str) -> list[int]:
+    return [m.start() for m in re.finditer("\n", text)]
 
 
 def extract_wikilinks(body: str) -> list[str]:
@@ -212,6 +218,7 @@ class CandidateIndex:
         self._readable_by_name: dict[str, list[ScannedRecord]] = {}
         self._unreadable: set[tuple[str, str]] = set()
         self._unreadable_names: set[str] = set()
+        self._blind_kinds: set[str] = set()
         self._claims: dict[tuple[str | None, str], list[ScannedRecord]] = {}
         for scan in scans:
             for record in scan.records:
@@ -228,13 +235,22 @@ class CandidateIndex:
             for gone in scan.unreadable:
                 self._unreadable.add((gone.kind, gone.name))
                 self._unreadable_names.add(gone.name)
+            for hidden in scan.escaped:
+                if hidden.name is None:
+                    self._blind_kinds.add(hidden.kind)
+                else:
+                    self._unreadable.add((hidden.kind, hidden.name))
+                    self._unreadable_names.add(hidden.name)
 
     def lookup(self, kind: str | None, name: str) -> tuple[tuple[ScannedRecord, ...], bool]:
         """Return the readable records *kind*/*name* can resolve to, and whether
-        an unreadable record could also be it. A ``None`` kind matches by name alone."""
+        an unreadable or escaping record could also be it. A ``None`` kind matches by name
+        alone. A kind whose whole directory escapes could hold any name."""
         if kind is None:
-            return tuple(self._readable_by_name.get(name, ())), name in self._unreadable_names
-        return tuple(self._readable.get((kind, name), ())), (kind, name) in self._unreadable
+            return (tuple(self._readable_by_name.get(name, ())),
+                    name in self._unreadable_names or bool(self._blind_kinds))
+        return (tuple(self._readable.get((kind, name), ())),
+                (kind, name) in self._unreadable or kind in self._blind_kinds)
 
     def superseded_by(self, kind: str, name: str) -> tuple[ScannedRecord, ...]:
         """Return every record, in any vault, whose ``supersedes`` names *kind*/*name*

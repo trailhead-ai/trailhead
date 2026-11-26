@@ -1,6 +1,6 @@
 """``lore validate`` — a read-only check that a vault's records are well formed and its links resolve.
 
-Usage: ``lore validate [--vault NAME | --path DIR]``.
+Usage: ``lore validate [--vault NAME | --path DIR] [--max-scan-mib N]``.
 
 **Scoping.** With no flag every configured vault is checked and its links are
 resolved against every configured vault. ``--vault NAME`` checks only that vault
@@ -60,7 +60,7 @@ from ..health import dangling as dangling_mod
 from ..health import scan as scan_mod
 from ..health import structure as structure_mod
 from ..health.model import VaultScan
-from .health import _malformed_evidence
+from .health import _malformed_evidence, add_max_scan_mib, budget_phrase, scan_budget
 from .record import _printable
 
 PATH_LABEL = "path"
@@ -121,6 +121,8 @@ def _vault_level(scan: VaultScan, extra_skips: int) -> list[Finding]:
     out = []
     if scan.unreadable_reason == scan_mod.REASON_VAULT_MISSING:
         out.append(Finding(scan.vault, "", CODE_VAULT_MISSING, "the vault directory does not exist"))
+    elif scan.unreadable_reason == scan_mod.REASON_OVER_BUDGET:
+        out.append(Finding(scan.vault, "", CODE_VAULT_UNREADABLE, budget_phrase(scan)))
     elif scan.unreadable_reason is not None:
         out.append(Finding(scan.vault, "", CODE_VAULT_UNREADABLE, "the vault directory could not be read"))
     outside = scan.skipped_escaping + extra_skips
@@ -142,7 +144,8 @@ def _link_finding(f: dangling_mod.Finding) -> Finding:
     return Finding(f.vault, record_id, CODE_MISSING_TARGET, f"{f.field} → {f.target}: no such record")
 
 
-def validate(only: str | None, path: str | None) -> tuple[list[Finding], int, int]:
+def validate(only: str | None, path: str | None,
+             max_scan_mib: int | None = None) -> tuple[list[Finding], int, int]:
     """Run the checks; return ``(sorted findings, records checked, vaults checked)``."""
     if only is not None and path is not None:
         raise _CannotRun("give --vault or --path, not both")
@@ -167,7 +170,7 @@ def validate(only: str | None, path: str | None) -> tuple[list[Finding], int, in
             raise _CannotRun(str(exc)) from exc
         checked = [n for n, _ in roots if only is None or n == only]
 
-    scans = [_scan_vault(name, root) for name, root in roots]
+    scans = [_scan_vault(name, root, max_bytes=scan_budget(max_scan_mib)) for name, root in roots]
     findings: list[Finding] = []
     records = 0
     for scan, (_, root) in zip(scans, roots):
@@ -182,11 +185,13 @@ def validate(only: str | None, path: str | None) -> tuple[list[Finding], int, in
 
     result = dangling_mod.check_dangling(scans, checked, include_sessions=True)
     if isinstance(result, dangling_mod.DanglingSkipped):
-        for name in result.vaults:
-            findings.append(Finding(name, "", CODE_LINKS_NOT_CHECKED,
-                                    "the vault could not be fully read, so links were not checked"))
+        unchecked = result.vaults
     else:
+        unchecked = result.skipped
         findings += [_link_finding(f) for f in result.findings]
+    for name in unchecked:
+        findings.append(Finding(name, "", CODE_LINKS_NOT_CHECKED,
+                                "the vault could not be fully read, so links were not checked"))
 
     findings.sort(key=Finding.key)
     return findings, records, len(checked)
@@ -210,7 +215,7 @@ def _stdout_closed() -> None:
 def cmd_validate(args) -> int:
     """Run ``lore validate``; see the module docstring for the exit contract."""
     try:
-        findings, records, vaults = validate(args.vault, args.path)
+        findings, records, vaults = validate(args.vault, args.path, args.max_scan_mib)
     except _CannotRun as exc:
         print(_printable(f"lore: cannot validate: {exc}"), file=sys.stderr)
         return 2
@@ -250,4 +255,5 @@ def add_validate_subparser(sub) -> None:
     p.add_argument("--vault", default=None, metavar="NAME", help="Check only this configured vault")
     p.add_argument("--path", default=None, metavar="DIR",
                    help="Check this directory as a vault, reading no lore configuration")
+    add_max_scan_mib(p)
     p.set_defaults(func=cmd_validate)

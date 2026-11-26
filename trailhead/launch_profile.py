@@ -34,6 +34,10 @@ each direct subdirectory of it that holds a ``.git`` entry (a member's worktree)
 member's ``MEMBER_GUARDED_NAMES``. It is read from disk when the profile resolves, so a
 member created later is not named.
 
+``unnamed-vaults`` is a set role derived from the one vault the caller names: every directory
+under the lore state's ``vaults`` root except that vault (and any entry that resolves to it).
+It is read from disk when the profile resolves.
+
 ``readable_roles`` names directories the session may read although they lie outside its
 write roots; the harness grants read access and no write there.
 
@@ -63,6 +67,7 @@ ROLE_OTHER_VAULTS = "other-vaults"
 ROLE_OTHER_ACCOUNT_CONFIGS = "other-account-configs"
 ROLE_CREDENTIAL_DIRS = "credential-dirs"
 ROLE_WORKSPACE_GUARDS = "workspace-guards"
+ROLE_UNNAMED_VAULTS = "unnamed-vaults"
 
 #: Credential stores under the account's home that a session may neither read nor send to an
 #: allowed domain, named relative to the home. ``~/.npmrc`` is deliberately absent: installs
@@ -100,6 +105,8 @@ TASK_WRAPPER_PLACEHOLDERS = ("{worktree}", "{member}")
 SETUP_SANDBOX_KEYS = ("allowed_domains", "denied_domains", "denied_reads")
 DRIVE_GROUPS_OUTPUT_KEYS = ("groups",)
 _BROKER_SESSION_ID_RE = re.compile(BROKER_SESSION_ID_PATTERN)
+VAULT_NAME_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+_VAULT_NAME_RE = re.compile(VAULT_NAME_PATTERN)
 
 
 class LaunchProfileError(ValueError):
@@ -116,6 +123,10 @@ class UnknownRoleError(LaunchProfileError):
 
 class WorkspaceError(LaunchProfileError):
     """The workspace path is missing, outside camp's worktrees root, or not a camp workspace."""
+
+
+class VaultError(LaunchProfileError):
+    """The vault name is missing, malformed, or not a vault directory directly under the vaults root."""
 
 
 class InvalidBrokerSessionError(LaunchProfileError):
@@ -280,6 +291,46 @@ def validate_workspace(
     return real
 
 
+def _vaults_root(env, platform) -> Path:
+    return state_dir("lore", env=env, platform=platform) / "vaults"
+
+
+def validate_vault(
+    vault: str,
+    *,
+    env: dict[str, str] | None = None,
+    platform: str | None = None,
+) -> Path:
+    """The real path of the named lore vault, or :class:`VaultError`.
+
+    The name must be a plain directory name (``VAULT_NAME_PATTERN``), and the directory
+    must exist directly under the lore state's ``vaults`` root once symlinks are resolved:
+    a link that points out of the root, or at another vault, is refused.
+    """
+    if not _VAULT_NAME_RE.fullmatch(vault):
+        raise VaultError(
+            f"--vault {vault!r} is not a vault name; it must match {VAULT_NAME_PATTERN} "
+            "(see `lore vault ls` for the names)"
+        )
+    root = _vaults_root(env, platform)
+    real = Path(os.path.realpath(root / vault))
+    if real != Path(os.path.realpath(root)) / vault:
+        raise VaultError(
+            f"--vault {vault!r} resolves to {real}, which is not a vault directly under {root}; "
+            "name a vault from `lore vault ls`"
+        )
+    if not real.is_dir():
+        raise VaultError(f"--vault {vault!r} is not an existing vault under {root}; name one from `lore vault ls`")
+    return real
+
+
+def _unnamed_vaults(vault: Path, env, platform) -> tuple[Path, ...]:
+    root = _vaults_root(env, platform)
+    if not root.is_dir():
+        return ()
+    return tuple(p for p in sorted(root.iterdir()) if p.is_dir() and not os.path.samefile(p, vault))
+
+
 def _expand_home(value: str, env: dict[str, str] | None) -> str:
     home = (env if env is not None else os.environ).get("HOME", "")
     return home + value[1:] if value == "~" or value.startswith("~/") else value
@@ -411,7 +462,7 @@ class LaunchProfile:
     effort: str | None = None
 
     def __post_init__(self) -> None:
-        known = (*_ROLE_RESOLVERS, *_ROLE_SET_RESOLVERS, ROLE_WORKSPACE, ROLE_WORKSPACE_GUARDS)
+        known = (*_ROLE_RESOLVERS, *_ROLE_SET_RESOLVERS, ROLE_WORKSPACE, ROLE_WORKSPACE_GUARDS, ROLE_UNNAMED_VAULTS)
         for role in (
             *self.writable_roles,
             *self.git_guarded_roles,
@@ -479,7 +530,7 @@ RITUAL_PROFILE = LaunchProfile(
         ROLE_OTHER_ACCOUNT_CONFIGS,
         ROLE_CREDENTIAL_DIRS,
     ),
-    write_denied_roles=(ROLE_OTHER_MIRRORS, ROLE_OTHER_VAULTS, ROLE_WORKSPACE_GUARDS),
+    write_denied_roles=(ROLE_OTHER_MIRRORS, ROLE_OTHER_VAULTS, ROLE_WORKSPACE_GUARDS, ROLE_UNNAMED_VAULTS),
     readable_roles=(ROLE_PLUGIN_TREE,),
     network_allowed_hosts=(),
     mcp_servers=(),
@@ -497,12 +548,16 @@ def resolve_profile(
     platform: str | None = None,
     workspace: str | os.PathLike[str] | None = None,
     without_workspace: bool = False,
+    vault: str | None = None,
 ) -> ResolvedProfile:
     """Resolve *profile*'s roles for *account*.
 
     ``without_workspace`` resolves a workspace-taking profile with no workspace, for a
     caller that reads only what does not depend on one (the ``workspace`` role is then
     absent from the result's paths); it is refused alongside a *workspace*.
+
+    A profile that write-denies ``unnamed-vaults`` needs the one *vault* its session may write
+    (see :func:`validate_vault`); a profile that does not takes none.
     """
     validate_account(account)
     roles = dict.fromkeys(
@@ -521,10 +576,20 @@ def resolve_profile(
         raise WorkspaceError("a ritual session needs a workspace; none was given")
     if workspace is not None and not wants_workspace:
         raise WorkspaceError("this profile takes no workspace")
+    wants_vault = ROLE_UNNAMED_VAULTS in roles
+    if wants_vault and vault is None and not without_workspace:
+        raise VaultError("a ritual session needs a vault; pass --vault <name> (see `lore vault ls`)")
+    if vault is not None and not wants_vault:
+        raise VaultError("this profile takes no vault")
+    if vault is not None and without_workspace:
+        raise VaultError("without_workspace and a vault were both given")
     paths: dict[str, Path] = {}
     path_sets: dict[str, tuple[Path, ...]] = {}
     for role in roles:
-        if role == ROLE_WORKSPACE:
+        if role == ROLE_UNNAMED_VAULTS:
+            if not without_workspace:
+                path_sets[role] = _unnamed_vaults(validate_vault(vault, env=env, platform=platform), env, platform)
+        elif role == ROLE_WORKSPACE:
             if without_workspace:
                 continue
             paths[role] = validate_workspace(workspace, env=env, platform=platform)
