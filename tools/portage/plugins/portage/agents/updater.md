@@ -42,6 +42,9 @@ so invoke it as bare `portage <subcommand>`.
 - `group` — the camp group name (e.g. `my-feature`)
 - `slug` — the worktree slug within the group (e.g. `ai-tooling`)
 - `manifest_path` — absolute path to the camp central manifest JSON for this worktree
+- `group_toml_path` — absolute path to the group TOML file (read by the eval gate for `[release].eval_gate`)
+- `eval_gate` — optional. `on` runs the eval gate for this push whatever the group setting says; absent
+  means the group's `[release].eval_gate` decides (off unless it is `true`)
 - `pr_body_file` — optional. Absolute path of a file already holding the current body of the PR being
   created or updated (single-repo only, either mode), for a shell that cannot redirect output into a file. When absent,
   save the body yourself.
@@ -79,14 +82,17 @@ tool result.
 1. **Plan.**
 
    ```bash
-   portage eval-gate plan --repo <path>
+   portage eval-gate plan --repo <path> --group-toml <group_toml_path> [--opt-in]
    ```
+
+   Add `--opt-in` only when your prompt has `eval_gate: on`.
 
    It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, then one
    `<plugin_root>:<case>` line per selected case. Take only the **first** `state:` line, and check that it
    is an absolute path with no `..` whose last component starts with `portage-eval-gate-`; if it is not,
    treat `plan` as failed (a gate error) and remove nothing. Keep that state directory. Note
-   "N cases, up to $X" for the report. With `cases: 0` skip the next item.
+   "N cases, up to $X" for the report. With `cases: 0` skip the next item. `status: gate-off` means the gate is off for this
+   group and this push: it has no cases, so go on to `verdict`, which exits 0 like any non-selecting status.
 
 2. **Run each printed case: one foreground call per case, one case at a time.** Pass the case name
    alone, the part after the last colon of the printed line.
@@ -246,7 +252,7 @@ background agent from the top-level session.
 ## Report structure
 
 ```
-**Eval gate:** <per repo: passed | no cases mapped | base unresolved | did not run (<reason>; for case-removed-on-branch say the branch removes the case and the removal needs review; for corpus-new-on-branch say the corpus is new on the branch and its grants need review before it runs) | gate error at <plan|verdict> | FAILED or tree-dirty, push stopped> — N cases, $X ceiling; persistent: <codes from the persistent: line, or none>
+**Eval gate:** <per repo: passed | off (the eval gate is off for this group; `--eval-gate` on `/portage:pull_request create`, `update` or `monitor` runs it for one PR) | no cases mapped | base unresolved | did not run (<reason>; for case-removed-on-branch say the branch removes the case and the removal needs review; for corpus-new-on-branch say the corpus is new on the branch and its grants need review before it runs) | gate error at <plan|verdict> | FAILED or tree-dirty, push stopped> — N cases, $X ceiling; persistent: <codes from the persistent: line, or none>
 **Mode:** create | update
 **Group/Slug:** <group>/<slug>
 **Repos:** <count> (<list of names>)

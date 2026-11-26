@@ -32,7 +32,8 @@ Markers, each on its own line, wrapping the section::
    ``runner-sandbox-unwritable``: nothing about the branch will change them), or
    ``persistent: none``. When the outcome is ``base-unresolved`` the line is
    ``persistent: base-unresolved`` (a repo with no resolvable base hits it on every
-   push). ``case-removed-on-branch`` and ``corpus-new-on-branch`` are not persistent. ``persistent_reasons`` is the
+   push). ``case-removed-on-branch``, ``corpus-new-on-branch`` and ``corpus-paused`` are not persistent.
+   ``persistent_reasons`` is the
    classification of reason codes;
 3. ``ignored:`` lines for result files whose case is not in the plan, then one
    ``derived: <plugin_root> <case>: <file>, <file>, ...`` line per selected declared case (the plan entry's
@@ -66,8 +67,9 @@ repeated in the section. A ``split_procedure`` case (its entry loads a branch fi
 merge tier, under the report line ``split-procedure-not-run: <cases>`` with the same per-case lines; a case
 that is both is named under the split line only. Unlike a merge-only case, a split case in a corpus new on the
 branch (``corpus-new-on-branch``) stops too, its line saying to land the corpus mapping first; one removed on
-the branch (``case-removed-on-branch``) is exempt. A merge-only case that can never run (``case-removed-on-branch``,
-``corpus-new-on-branch``) is reported as on push and does not stop the change. A not-run core case
+the branch (``case-removed-on-branch``) or in a paused corpus (``corpus-paused``) is exempt. A merge-only
+case that can never run (``case-removed-on-branch``, ``corpus-new-on-branch``, ``corpus-paused``) is
+reported as on push and does not stop the change. A not-run core case
 still lets the change through, as on push.
 
 Exit codes: 0 push, 1 stop, 2 usage, unusable state directory/plan, an OS error reading or writing, or a marker fault.
@@ -97,6 +99,7 @@ from portage.eval_core.run import NO_RUNNER, RUNNER_MISSING
 from .run import (
     CASE_REMOVED,
     CORPUS_NEW,
+    CORPUS_PAUSED,
     HEAD_MOVED,
     SANDBOX_UNWRITABLE,
     RunRefused,
@@ -112,7 +115,7 @@ MERGE_ONLY_NOT_RUN = "merge-only-not-run"
 SPLIT_NOT_RUN = "split-procedure-not-run"
 STOP_LINES = (MERGE_ONLY_NOT_RUN, SPLIT_NOT_RUN)
 
-UNRUNNABLE = (CASE_REMOVED, CORPUS_NEW)
+UNRUNNABLE = (CASE_REMOVED, CORPUS_NEW, CORPUS_PAUSED)
 
 PERSISTENT = (NO_RUNNER, RUNNER_MISSING, SANDBOX_UNWRITABLE)
 
@@ -131,6 +134,7 @@ REASONS = {
     CASE_REMOVED: "the branch removes this case; it was not run — review the removal",
     CORPUS_NEW: ("this corpus is new on the branch, so its runner grants are unreviewed and its "
                  "cases were not run — review the grants"),
+    CORPUS_PAUSED: "this corpus's evals are paused by the operator, so its cases were not run",
     HEAD_MOVED: ("the repo's head or a tracked file changed after the plan was made, so the case "
                  "was not run"),
     NO_RESULT: "no usable result was recorded for this case",
@@ -139,7 +143,10 @@ REASONS = {
 _STEP = re.compile(r"^[a-z][a-z0-9-]{0,31}\Z")
 _GRADER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 _STATUSES = ("cases-selected", "no-cases-mapped", "base-unresolved", "base-invalid", "mapping-invalid",
-             "tree-dirty")
+             "tree-dirty", "gate-off")
+
+GATE_OFF = ("The eval gate is off for this group, so no cases were run. To run it for one PR, use "
+            "`/portage:pull_request create --eval-gate` (or `update` or `monitor` with `--eval-gate`).")
 
 BASE_INVALID = "the base must not start with '-'"
 
@@ -441,6 +448,8 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     plan = _load_plan(state)
     status = plan["status"]
 
+    if status == "gate-off":
+        return 0, ["eval-gate: off", "persistent: none"], _wrap([GATE_OFF])
     if status == "mapping-invalid":
         bad = plan.get("mapping_invalid") if isinstance(plan.get("mapping_invalid"), dict) else {}
         file, fault = _corpus(bad.get("file")), _safe_fault(bad.get("fault", "unspecified"))
@@ -478,7 +487,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     notrun = [r for r in rows if r["result"]["verdict"] == "not-run"]
     persistent = persistent_reasons(r["result"]["reason"] for r in notrun)
     merge_tier = plan.get("tier") == "merge"
-    unrun_split = ([r for r in notrun if r["split"] and r["result"]["reason"] != CASE_REMOVED]
+    unrun_split = ([r for r in notrun if r["split"] and r["result"]["reason"] not in (CASE_REMOVED, CORPUS_PAUSED)]
                    if merge_tier else [])
     unrun_merge_only = ([r for r in notrun if r["merge_only"] and not r["split"]
                          and r["result"]["reason"] not in UNRUNNABLE] if merge_tier else [])

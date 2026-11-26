@@ -10,7 +10,7 @@ first detected harness for its eval runner, runs it bounded by a wall-clock time
      "passed": int, "failed": int, "errored": int,     # scored passes / scored fails / errored runs
      "reason": null | "harness-has-no-eval-runner" | "runner-missing" | "timeout"
                     | "cost-cap" | "runner-error" | "runs-errored" | "runner-sandbox-unwritable"
-                    | "case-removed-on-branch" | "corpus-new-on-branch" | "head-moved",
+                    | "case-removed-on-branch" | "corpus-new-on-branch" | "corpus-paused" | "head-moved",
      "runs": [{"passed": bool, "errored": bool,
                "graders": [{"name": str, "passed": bool}, ...],
                "duration_seconds": number | null, "cost_usd": number | null,
@@ -104,6 +104,9 @@ A plan entry with ``new_runner_grants`` true (its corpus has no mapping at the b
 runner grants are unreviewed) is recorded as not-run ``corpus-new-on-branch`` the same way: no
 harness lookup, no canary, no runner.
 
+A plan entry with ``paused`` true (the operator paused its corpus's evals) is recorded as not-run
+``corpus-paused`` the same way.
+
 A plan entry with ``case_removed`` true (the branch removes the case) is recorded as
 not-run ``case-removed-on-branch`` before any harness lookup or canary; no runner starts.
 A runner that cannot be launched (``OSError``: not found, not executable, bad format) is
@@ -154,6 +157,7 @@ MAX_TIMEOUT_SECONDS = 540
 
 CASE_REMOVED = "case-removed-on-branch"
 CORPUS_NEW = "corpus-new-on-branch"
+CORPUS_PAUSED = "corpus-paused"
 HEAD_MOVED = "head-moved"
 
 
@@ -264,6 +268,8 @@ def run_case(
         return _record(state, case, not_run(case, n, CASE_REMOVED))
     if entry.get("new_runner_grants") is True:
         return _record(state, case, not_run(case, n, CORPUS_NEW))
+    if entry.get("paused") is True:
+        return _record(state, case, not_run(case, n, CORPUS_PAUSED))
     runner_cfg = entry["runner"]
 
     if env is None:

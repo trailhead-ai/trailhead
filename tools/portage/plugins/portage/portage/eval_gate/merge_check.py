@@ -1,7 +1,9 @@
 """The merge-tier backstop behind ``portage merge --eval-state``.
 
 ``check_pair`` decides, for one pull request's repo, whether a merge may go ahead and which head
-commit to pin it to. It applies only when the repo's change touches a ``merge_only`` or a
+commit to pin it to. When the group's eval gate is off (``setting.gate_enabled``) and no ``--eval-state`` is
+given for the repo, the check does not apply; a state that is given is checked in full. Otherwise it
+applies only when the repo's change touches a ``merge_only`` or a
 ``split_procedure`` eval case (one whose entry loads a branch file; decided by ``select.backstop_touched``, the
 selection ``plan`` uses); anywhere else it answers "not applicable" and the merge is unchanged. Where it
 applies, every one of these refuses, and the check name is what the refusal prints::
@@ -114,15 +116,17 @@ def check_pair(
     repo_path: str,
     state: Path | None,
     read_head: Callable[[], str],
+    gate_on: bool = True,
 ) -> tuple[Refusal | None, str | None]:
     """``(None, None)`` when the check does not apply, ``(None, head)`` when it passed (pin the
-    merge to ``head``), ``(Refusal, None)`` when the merge must be refused."""
+    merge to ``head``), ``(Refusal, None)`` when the merge must be refused. With ``gate_on`` false
+    and no ``state`` the check does not apply, as for a change touching no covered case."""
     repo = Path(repo_path)
     try:
         applies, status, covered = _applies(repo)
     except (GitError, OSError) as e:
         return Refusal("selection-failed", gate_verdict.one_line(e)), None
-    if not applies:
+    if not applies or (state is None and not gate_on):
         return _pin_untouched(repo, status, read_head)
 
     def refuse(check: str, detail: str, unresolved: bool = False) -> Refusal:

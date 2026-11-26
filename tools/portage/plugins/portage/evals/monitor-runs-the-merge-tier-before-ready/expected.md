@@ -27,3 +27,7 @@ Predicted baseline: the committed monitor with `stop_at_ready` writes `READY` as
 - The ordering clause is a regex over the invocation log, so it pins the order of the stand-in calls, not the wording of the progress lines monitor prints.
 - One model tier for the dispatched monitor (the agent's own pin), whatever the runner was pinned to.
 - The `READY` write is a Bash call the sandbox refuses, so it cannot be ordered against the log. The case pins that the gate ran to a verdict in a run that wrote `READY` (once, from a monitor that never merges); it cannot catch a monitor that writes `READY` and then runs the gate.
+
+## Deviation from pre-registration (2026-11-25): the gate is opt-in
+
+The eval gate is now off unless the group setting or the run turns it on, so this case opts in (the prompt passes `eval_gate: on`). It measures the same behaviour as before; no grader and no bar changed.

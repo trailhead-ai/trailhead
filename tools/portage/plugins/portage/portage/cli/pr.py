@@ -31,6 +31,7 @@ from trailhead.vcs.github import (
 
 from .. import holds
 from ..eval_gate import merge_check
+from ..eval_gate.setting import gate_enabled
 from ..pairs import PairFormatError, split_pair
 from ..sidecar import parse_pr_token
 
@@ -140,7 +141,8 @@ def _add_merge(sub) -> None:
             "or through the host. When the change touches a merge-only or split-procedure eval case, the merge "
             "is refused (exit 2) unless --eval-state names a current merge-tier eval-gate "
             "state for that repo whose head is the PR's current head; --operator-directed "
-            "does not waive it, and the merge is pinned to that head."
+            "does not waive it, and the merge is pinned to that head. When the group's "
+            "[release].eval_gate is not true, a repo given no --eval-state is exempt."
         ),
     )
     p.add_argument("--manifest", required=True, help="Path to the camp central manifest.json")
@@ -197,7 +199,7 @@ def _held_branch_refusal(pr_pairs: list[PRPair], provider) -> str | None:
     return None
 
 
-def _eval_gate_pins(pr_pairs: list[PRPair], eval_states: dict, provider) -> bool:
+def _eval_gate_pins(pr_pairs: list[PRPair], eval_states: dict, provider, gate_on: bool = True) -> bool:
     """Run the merge-tier backstop over every pair; on success pin each verified pair to its head.
 
     Prints each refusal to stderr and returns False when any pair is refused, so nothing merges.
@@ -209,6 +211,7 @@ def _eval_gate_pins(pr_pairs: list[PRPair], eval_states: dict, provider) -> bool
             pair.repo_path,
             state,
             lambda pair=pair: provider.pr.head_commit(pair.repo_path, pair.pr_number),
+            gate_on,
         )
         if refusal:
             refusals.append(merge_check.format_refusal(pair.repo_path, refusal))
@@ -249,7 +252,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
         print(refusal, file=sys.stderr)
         return 2
 
-    if not _eval_gate_pins(pr_pairs, eval_states, provider):
+    if not _eval_gate_pins(pr_pairs, eval_states, provider, gate_enabled(args.toml)):
         return 2
 
     try:
