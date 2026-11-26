@@ -1661,4 +1661,6 @@ def launched_session_settings(root: Path, outpost_state: Path, workspace: Path) 
         resolved, workspace.resolve(), None, interactive=False, account=None, env=env, platform="linux",
         session_dir=outpost_state.resolve() / "sessions" / "launch-probe",
     )
-    return json.loads(start.argv[start.argv.index("--settings") + 1])
+    value = start.argv[start.argv.index("--settings") + 1]
+    named = [f for f in start.files if f.path == value]
+    return json.loads(named[0].content if named else value)

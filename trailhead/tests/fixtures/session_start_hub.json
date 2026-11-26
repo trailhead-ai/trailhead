@@ -2,7 +2,7 @@
   "argv": [
     "claude",
     "--settings",
-    "{\"enabledMcpjsonServers\":[],\"permissions\":{\"allow\":[\"mcp__outpost__timeline_since\",\"mcp__outpost__drive_spec\",\"mcp__outpost__release_drive\"],\"deny\":[\"Read(/<ROOT>/fence/outpost-state/**)\",\"Edit(/<TRAILHEAD>/bin/**)\",\"Edit(/<TRAILHEAD>/trailhead/**)\",\"Edit(/<ROOT>/fence/outpost-state/**)\",\"Edit(/<ROOT>/fence/outpost-state/sessions/sess-1/**)\",\"Edit(/<TRAILHEAD>/bin/trailhead)\",\"Edit(/<TRAILHEAD>/pyproject.toml)\",\"Skill(craft:drive)\"]},\"sandbox\":{\"allowUnsandboxedCommands\":false,\"enabled\":true,\"failIfUnavailable\":true,\"filesystem\":{\"allowWrite\":[\"<ROOT>/fence/ranger-state/hubs/a\",\"<ROOT>/fence/lore-state\",\"<ROOT>/fence/cache\"],\"denyRead\":[\"<ROOT>/fence/outpost-state\"],\"denyWrite\":[\"<ROOT>/fence/ranger-state/hubs/a/.claude\",\"<ROOT>/fence/ranger-state/hubs/a/.mcp.json\",\"<ROOT>/fence/outpost-state/sessions/sess-1\",\"<ROOT>/fence/scratch\",\"<ROOT>/fence/lore-state/vaults/default/.git/config\",\"<ROOT>/fence/lore-state/vaults/default/.git/hooks\",\"<ROOT>/fence/lore-state/vaults/default/.git/info\",\"<ROOT>/fence/lore-state/*/*/.git/config\",\"<ROOT>/fence/lore-state/*/*/.git/hooks\",\"<ROOT>/fence/lore-state/*/*/.git/info\"]},\"network\":{\"deniedDomains\":[\"api.anthropic.com\"]}}}",
+    "<ROOT>/fence/outpost-state/sessions/sess-1/launch-settings.json",
     "--permission-mode",
     "dontAsk",
     "--mcp-config",
@@ -33,6 +33,11 @@
     {
       "path": "<ROOT>/fence/outpost-state/sessions/sess-1/mcp-config.json",
       "content": "{\n  \"mcpServers\": {\n    \"outpost\": {\n      \"headersHelper\": \"<TRAILHEAD>/bin/trailhead broker-header --credential-file <ROOT>/fence/outpost-state/sessions/sess-1/broker-client.json\",\n      \"type\": \"http\",\n      \"url\": \"http://127.0.0.1:7313/broker/mcp\"\n    }\n  }\n}\n",
+      "mode": "0600"
+    },
+    {
+      "path": "<ROOT>/fence/outpost-state/sessions/sess-1/launch-settings.json",
+      "content": "{\n  \"enabledMcpjsonServers\": [],\n  \"permissions\": {\n    \"allow\": [\n      \"mcp__outpost__timeline_since\",\n      \"mcp__outpost__drive_spec\",\n      \"mcp__outpost__release_drive\"\n    ],\n    \"deny\": [\n      \"Read(/<ROOT>/fence/outpost-state/**)\",\n      \"Edit(/<TRAILHEAD>/bin/**)\",\n      \"Edit(/<TRAILHEAD>/trailhead/**)\",\n      \"Edit(/<ROOT>/fence/outpost-state/**)\",\n      \"Edit(/<ROOT>/fence/outpost-state/sessions/sess-1/**)\",\n      \"Edit(/<TRAILHEAD>/bin/trailhead)\",\n      \"Edit(/<TRAILHEAD>/pyproject.toml)\",\n      \"Skill(craft:drive)\"\n    ]\n  },\n  \"sandbox\": {\n    \"allowUnsandboxedCommands\": false,\n    \"enabled\": true,\n    \"failIfUnavailable\": true,\n    \"filesystem\": {\n      \"allowWrite\": [\n        \"<ROOT>/fence/ranger-state/hubs/a\",\n        \"<ROOT>/fence/lore-state\",\n        \"<ROOT>/fence/cache\"\n      ],\n      \"denyRead\": [\n        \"<ROOT>/fence/outpost-state\"\n      ],\n      \"denyWrite\": [\n        \"<ROOT>/fence/ranger-state/hubs/a/.claude\",\n        \"<ROOT>/fence/ranger-state/hubs/a/.mcp.json\",\n        \"<ROOT>/fence/outpost-state/sessions/sess-1\",\n        \"<ROOT>/fence/scratch\",\n        \"<ROOT>/fence/lore-state/vaults/default/.git/config\",\n        \"<ROOT>/fence/lore-state/vaults/default/.git/hooks\",\n        \"<ROOT>/fence/lore-state/vaults/default/.git/info\",\n        \"<ROOT>/fence/lore-state/*/*/.git/config\",\n        \"<ROOT>/fence/lore-state/*/*/.git/hooks\",\n        \"<ROOT>/fence/lore-state/*/*/.git/info\"\n      ]\n    },\n    \"network\": {\n      \"deniedDomains\": [\n        \"api.anthropic.com\"\n      ]\n    }\n  }\n}\n",
       "mode": "0600"
     }
   ]

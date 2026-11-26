@@ -145,7 +145,17 @@ def _start(env, *, profile=HUB_PROFILE, prompt=None, interactive=True, account=N
 
 
 def _settings_of(start: SessionStart) -> dict:
-    return json.loads(start.argv[start.argv.index("--settings") + 1])
+    """The settings the launch hands Claude Code: from the session file ``--settings`` names, else inline."""
+    value = start.argv[start.argv.index("--settings") + 1]
+    named = [f for f in start.files if f.path == value]
+    return json.loads(named[0].content if named else value)
+
+
+def _mcp_config_of(argv, files):
+    """The session file ``--mcp-config`` names, from a SessionStart's files or a launch's JSON."""
+    path = argv[argv.index("--mcp-config") + 1]
+    (file,) = [f for f in files if (f["path"] if isinstance(f, dict) else f.path) == path]
+    return file
 
 
 def _hub_roots(env) -> tuple[str, str, str]:
@@ -1612,7 +1622,7 @@ def test_hub_start_from_a_foreign_cwd_carries_the_broker_server_helper_and_allow
     result = _run_subprocess(env, foreign, "--broker-session", "sess-1")
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout)
-    (file,) = out["files"]
+    file = _mcp_config_of(out["argv"], out["files"])
     config = json.loads(file["content"])
     server = config["mcpServers"][CONTRACT["broker_server"]]
     assert server["type"] == "http"
@@ -1623,7 +1633,7 @@ def test_hub_start_from_a_foreign_cwd_carries_the_broker_server_helper_and_allow
     assert helper.endswith(out["broker"]["credential_path"])
     assert _flag_value(out["argv"], "--mcp-config") == file["path"]
     assert "--strict-mcp-config" in out["argv"]
-    settings = json.loads(_flag_value(out["argv"], "--settings"))
+    settings = _launched_settings(out)
     assert sorted(settings["permissions"]["allow"]) == sorted(
         f"mcp__{CONTRACT['broker_server']}__{tool}"
         for tool in (CONTRACT["broker_tool"], CONTRACT["drive_tool"], CONTRACT["release_tool"])
@@ -1637,7 +1647,7 @@ def test_hub_start_from_a_foreign_cwd_carries_the_broker_server_helper_and_allow
 def test_the_mcp_config_file_sits_in_the_session_directory_the_hub_can_neither_read_nor_write(tmp_path):
     env = _fence(tmp_path)
     start = _start(env)
-    (file,) = start.files
+    file = _mcp_config_of(start.argv, start.files)
     settings = _settings_of(start)
     fs = settings["sandbox"]["filesystem"]
     path = Path(file.path)
@@ -1650,7 +1660,7 @@ def test_a_profile_naming_no_mcp_server_gets_an_empty_strict_mcp_config(tmp_path
     env = _fence(tmp_path)
     profile = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles, mcp_servers=())
     start = _start(env, profile=profile, broker=broker_launch("s1", env=env))
-    (file,) = start.files
+    file = _mcp_config_of(start.argv, start.files)
     assert json.loads(file.content) == {"mcpServers": {}}
     assert _flag_value(start.argv, "--mcp-config") == file.path
     assert "--strict-mcp-config" in start.argv
@@ -2437,7 +2447,7 @@ def test_ritual_launch_has_no_broker_allow_rules_and_an_empty_strict_mcp_config(
     start = _ritual_start(env, ws)
     assert not [r for r in _settings_of(start)["permissions"].get("allow", []) if r.startswith("mcp__")]
     assert "--strict-mcp-config" in start.argv
-    (file,) = start.files
+    file = _mcp_config_of(start.argv, start.files)
     assert _flag_value(start.argv, "--mcp-config") == file.path
     assert json.loads(file.content) == {"mcpServers": {}}
     assert file.mode == "0600"
@@ -2451,7 +2461,7 @@ def test_cli_places_a_rituals_empty_mcp_config_in_outposts_session_directory(
     assert _ritual_cli(monkeypatch, env, ws, "--headless", session=sid) == 0
     out = json.loads(capsys.readouterr().out)
     expected = str(Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / sid / "empty-mcp-config.json")
-    (file,) = out["files"]
+    file = _mcp_config_of(out["argv"], out["files"])
     assert file["path"] == expected and file["mode"] == "0600"
     assert json.loads(file["content"]) == {"mcpServers": {}}
     assert _flag_value(out["argv"], "--mcp-config") == expected
@@ -3306,7 +3316,7 @@ def test_cli_ritual_start_with_a_vault_names_the_denied_vaults_in_its_settings(t
     _lore_vault_dirs(env, "a", "b")
     assert _ritual_cli(monkeypatch, env, ws, vault="a") == 0
     out = json.loads(capsys.readouterr().out)
-    settings = json.loads(out["argv"][out["argv"].index("--settings") + 1])
+    settings = _launched_settings(out)
     vaults = Path(env["LORE_STATE_DIR"]).resolve() / "vaults"
     assert str(vaults / "b") in settings["sandbox"]["filesystem"]["denyWrite"]
     assert str(vaults / "a") not in settings["sandbox"]["filesystem"]["denyWrite"]
@@ -3421,3 +3431,28 @@ def test_real_sandbox_refuses_a_write_into_a_vault_the_ritual_did_not_name(tmp_p
     assert (vaults / "a" / ".lore.lock").exists()
     assert denied.returncode != 0
     assert not (vaults / "b" / ".lore.lock").exists()
+
+
+def _launched_settings(out: dict) -> dict:
+    """The settings a launch hands Claude Code: the session file ``--settings`` names."""
+    path = out["argv"][out["argv"].index("--settings") + 1]
+    (entry,) = [f for f in out["files"] if f["path"] == path]
+    assert entry["mode"] == "0600"
+    return json.loads(entry["content"])
+
+
+@pytest.mark.parametrize("denied_vaults", [2, 200])
+def test_a_ritual_launch_command_stays_the_same_size_however_many_vaults_it_denies(
+    tmp_path, monkeypatch, capsys, denied_vaults
+):
+    # tmux refuses a new-session command over 16 KB, and the deny lists grow with the host.
+    env, ws = _ritual_ready(tmp_path)
+    _lore_vault_dirs(env, *(f"other-{i:03d}" for i in range(denied_vaults)))
+    assert _ritual_cli(monkeypatch, env, ws) == 0
+    out = json.loads(capsys.readouterr().out)
+    vaults = Path(env["LORE_STATE_DIR"]).resolve() / "vaults"
+    settings = _launched_settings(out)
+    assert str(vaults / f"other-{denied_vaults - 1:03d}") in settings["sandbox"]["filesystem"]["denyWrite"]
+    session_dir = Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / "rit-1"
+    assert Path(out["argv"][out["argv"].index("--settings") + 1]).parent == session_dir
+    assert sum(len(a) + 1 for a in out["argv"]) < 2048

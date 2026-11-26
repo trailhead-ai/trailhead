@@ -885,6 +885,7 @@ def claude_config_file(env: Mapping[str, str] | None) -> Path:
 
 _SETTINGS_FILENAME = "settings.json"
 _EMPTY_MCP_CONFIG = "empty-mcp-config.json"
+_LAUNCH_SETTINGS = "launch-settings.json"
 _READ_RULE_RE = re.compile(r"^Read\((?P<spec>[^)]*)\)$")
 
 #: Where Claude Code reads managed settings files (``managed-settings.json`` then every
@@ -2778,7 +2779,20 @@ class ClaudeCodeHarness(Harness):
         argv = ["claude"]
         if not interactive:
             argv.append("-p")
-        argv += ["--settings", json.dumps(settings, sort_keys=True, separators=(",", ":"))]
+        # A launch with a session directory takes its settings from a file there: tmux refuses a
+        # new-session command over 16 KB, and the deny lists grow with the host's vaults and mirrors.
+        settings_dir = session_dir if session_dir is not None else (
+            Path(broker.config_path).parent if wants_broker else None
+        )
+        if settings_dir is None:
+            argv += ["--settings", json.dumps(settings, sort_keys=True, separators=(",", ":"))]
+        else:
+            settings_file = SessionFile(
+                path=str(settings_dir / _LAUNCH_SETTINGS),
+                content=json.dumps(settings, sort_keys=True, indent=2) + "\n",
+                mode="0600",
+            )
+            argv += ["--settings", settings_file.path]
         argv += ["--permission-mode", "dontAsk"]
         for g in granted:
             argv += ["--add-dir", str(g)]
@@ -2790,6 +2804,8 @@ class ClaudeCodeHarness(Harness):
             argv += ["--effort", profile.profile.effort]
         if prompt:
             argv.append(prompt)
+        if settings_dir is not None:
+            files = (*files, settings_file)
         return SessionStart(
             argv=argv,
             env_set=env_set,
