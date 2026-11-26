@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""Compare three `claude plugin eval` result JSONs, one per arm, scenario by scenario.
+
+Usage: eval-arm-compare --slimmed A.json --frozen B.json --none C.json
+                        --family AC61=case,case [--family AC62=case,case ...]
+
+A scenario is a case name. Its count for an arm is the number of runs in
+cases[].arms.with[] with passed true and error null, out of the runs with no
+error (the graded runs). A run with error set, or with skippedPaidGraders true,
+is never a pass, is not graded, and is listed.
+
+Per scenario the verdict is:
+  fail          slimmed passes fewer runs than frozen, an arm lacks the scenario,
+                or an arm has fewer than three graded runs for it
+  inconclusive  frozen does not pass more runs than none
+  pass          otherwise
+
+Exit 0 when no scenario fails and every family has a scenario that is not
+inconclusive. Exit 1 naming the scenario, arm or family otherwise. Exit 2 with a
+message on a missing or unreadable file, malformed JSON, or a family case that
+no arm ran.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+ARMS = ("slimmed", "frozen", "none")
+MIN_GRADED = 3
+
+
+class UsageError(Exception):
+    pass
+
+
+def esc(value: object) -> str:
+    """VALUE as text with every non-printable character (newline, ESC, other controls) written as \\xNN or \\uNNNN."""
+    return "".join(
+        c if c.isprintable() else (f"\\x{ord(c):02x}" if ord(c) < 0x100 else f"\\u{ord(c):04x}" if ord(c) < 0x10000 else f"\\U{ord(c):08x}")
+        for c in str(value)
+    )
+
+
+def load(label: str, path: str) -> dict[str, list[dict]]:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except OSError as exc:
+        raise UsageError(f"--{label}: cannot read {path}: {exc.strerror or exc}")
+    except ValueError as exc:
+        raise UsageError(f"--{label}: {path} is not valid JSON: {exc}")
+    result: dict[str, list[dict]] = {}
+    try:
+        for c in doc["cases"]:
+            name, runs = c["name"], list(c["arms"]["with"])
+            if not isinstance(name, str):
+                raise TypeError(name)
+            if name in result:
+                raise UsageError(f"--{label}: {path} has a duplicate case name '{esc(name)}'")
+            if not all(isinstance(r, dict) for r in runs):
+                raise UsageError(f"--{label}: {path} case '{esc(name)}' has a run that is not an object")
+            result[name] = runs
+    except (KeyError, TypeError):
+        raise UsageError(f"--{label}: {path} has no cases[].arms.with[] result shape")
+    return result
+
+
+def parse_families(specs: list[str]) -> dict[str, list[str]]:
+    families: dict[str, list[str]] = {}
+    for spec in specs:
+        name, sep, cases = spec.partition("=")
+        names = [c for c in cases.split(",") if c]
+        if not sep or not name or not names:
+            raise UsageError(f"--family '{esc(spec)}': expected NAME=case,case")
+        if name in families:
+            raise UsageError(f"--family '{esc(name)}': duplicate family name")
+        families[name] = names
+    return families
+
+
+def _error_of(run: dict) -> str | None:
+    if run.get("error") is not None:
+        return str(run["error"])
+    if run.get("skippedPaidGraders"):
+        return "skippedPaidGraders"
+    return None
+
+
+def tally(runs: list[dict]) -> tuple[int, int, list[str]]:
+    errors = [_error_of(r) for r in runs if _error_of(r) is not None]
+    graded = [r for r in runs if _error_of(r) is None]
+    return sum(1 for r in graded if r.get("passed") is True), len(graded), errors
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    for arm in ARMS:
+        parser.add_argument(f"--{arm}", required=True, metavar="JSON")
+    parser.add_argument("--family", action="append", default=[], metavar="NAME=case,case")
+    args = parser.parse_args(argv)
+
+    try:
+        data = {arm: load(arm, getattr(args, arm)) for arm in ARMS}
+        families = parse_families(args.family)
+        scenarios = sorted({name for arm in ARMS for name in data[arm]})
+        for fam, cases in families.items():
+            for case in cases:
+                if case not in scenarios:
+                    raise UsageError(f"family {esc(fam)}: case '{esc(case)}' was not run by any arm")
+    except UsageError as exc:
+        print(f"eval-arm-compare: {exc}", file=sys.stderr)
+        return 2
+
+    failures: list[str] = []
+    verdicts: dict[str, str] = {}
+    for scenario in scenarios:
+        shown = esc(scenario)
+        parts, problems, errs = [], [], []
+        counts: dict[str, int] = {}
+        totals: dict[str, int] = {}
+        for arm in ARMS:
+            runs = data[arm].get(scenario)
+            if runs is None:
+                parts.append(f"{arm}=missing")
+                problems.append(f"arm {arm} has no runs for scenario {shown}")
+                continue
+            passed, graded, errors = tally(runs)
+            counts[arm] = passed
+            totals[arm] = graded
+            parts.append(f"{arm}={passed}/{graded}")
+            errs += [f"{arm}: {esc(e)}" for e in errors]
+            if graded < MIN_GRADED:
+                problems.append(f"arm {arm} is under-sampled for scenario {shown} ({graded} graded runs)")
+        if not problems and len(set(totals.values())) > 1:
+            problems.append(
+                f"scenario {shown}: arms graded different numbers of runs ({', '.join(f'{a}={t}' for a, t in totals.items())})"
+            )
+        if not problems and counts["slimmed"] < counts["frozen"]:
+            problems.append(f"scenario {shown}: slimmed passes fewer runs than frozen")
+        if problems:
+            verdict = "fail"
+            failures += problems
+        elif counts["frozen"] <= counts["none"]:
+            verdict = "inconclusive"
+        else:
+            verdict = "pass"
+        verdicts[scenario] = verdict
+        line = f"{shown}: {' '.join(parts)} verdict={verdict}"
+        if errs:
+            line += f" errors=[{'; '.join(errs)}]"
+        print(line)
+
+    for fam, cases in families.items():
+        if all(verdicts[c] == "inconclusive" for c in cases):
+            failures.append(f"family {esc(fam)} has no discriminating scenario")
+
+    for failure in failures:
+        print(f"FAIL: {failure}", file=sys.stderr)
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

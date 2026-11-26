@@ -22,5 +22,38 @@
   "task_wrapper_env": "CAMP_TASK_WRAPPER",
   "task_wrapper_placeholders": ["{worktree}", "{member}"],
   "setup_sandbox_keys": ["allowed_domains", "denied_domains", "denied_reads"],
-  "drive_groups_output_keys": ["groups"]
+  "drive_groups_output_keys": ["groups"],
+  "loop": {
+    "command": "read-outcome",
+    "argv": ["--spec", "--vault", "--output-file", "--json"],
+    "verdict_fields": ["verdict", "record", "reason_code"],
+    "outcome_kinds": ["plan-ready", "slice-chosen", "pr-ready", "stuck", "needs-a-decision", "waiting", "spec-complete", "refused"],
+    "record_name_pattern": "^[a-z0-9][a-z0-9-]{0,249}$",
+    "ritual_vault_flag": "--vault",
+    "prompts": {
+      "slice": "/craft:slice spec/<spec> --unattended",
+      "plan": "/craft:plan task/<parent> --unattended"
+    },
+    "reason_codes": {
+      "no-outcome": "Read the session's captured output; the ritual ended without printing an outcome line, so release the drive and re-drive.",
+      "malformed-outcome": "The session's outcome line broke craft's grammar; read the session output, then release the drive and re-drive.",
+      "record-outside-spec": "The session named a record outside this spec or vault; read the session output and the spec's slice record, then release the drive and re-drive.",
+      "record-unreadable": "The record the session named could not be read from the vault; check it exists with lore record show, then release the drive and re-drive.",
+      "record-mismatch": "The slice record's run block disagrees with the session's outcome; read the record's Unattended run block, then release the drive and re-drive.",
+      "ritual-stuck": "The ritual reported itself stuck; read the record it names and its Unattended run block, fix the cause, then release the drive and re-drive."
+    },
+    "drive_reason_codes": {
+      "session-killed": "The ritual session was ended before it finished; release the drive and re-drive.",
+      "output-not-captured": "The session's final output was not captured; read the session's own log, then release the drive and re-drive.",
+      "outcome-unreadable": "The command that judges the session outcome could not run; run trailhead doctor, then release the drive and re-drive.",
+      "the execute leg is the next slice": "The plan is ready and the drive stops here; the build runs as the next slice, so release the drive, then start it from the slice record.",
+      "drive predates the loop": "This drive began before the loop existed and cannot continue; release the drive, then start a new drive for the spec.",
+      "refused": "The ritual declined to run; read the reason in its output and the spec, fix the cause, then release the drive and re-drive.",
+      "waiting": "The ritual is waiting on something outside the loop; resolve it, then release the drive and re-drive.",
+      "spec-complete": "The spec has no slice left to choose; release the drive, then distill the spec.",
+      "needs-a-decision": "The ritual needs a decision only the operator can make; read the record it names, decide, then release the drive and re-drive.",
+      "pr-ready": "The slice is ready for a pull request; open it with portage, merge it, then release the drive and re-drive for the next slice.",
+      "slice-chosen reported again on the plan step": "The plan session chose a slice instead of planning one; read its output to see why."
+    }
+  }
 }

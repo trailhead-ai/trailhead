@@ -377,3 +377,84 @@ def test_the_pairing_guard_runs_once_per_pair_however_many_findings_repeat_it(mo
     assert len(res.findings) == 2
     assert [c.supersede_allowed for f in res.findings for c in f.retired] == [True, True]
     assert calls == ["decision/old"]
+
+
+def test_an_escaped_record_with_a_retired_namesake_is_never_called_retired():
+    escaped = vault("a", skipped_escaping=1, escaped=[model.EscapedRecord("a", "lesson", "old")])
+    namesake = vault("b", rec("b", "lesson", "old", "dropped"))
+    linker = vault("c", linking("decision", "src", "active", rel("lesson", "old")))
+    quiet = run([escaped, namesake, linker])
+    assert isinstance(quiet, retired.RetiredResult) and quiet.findings == []
+    control = run([namesake, linker])
+    assert [f.target for f in control.findings] == ["lesson/old"]
+
+
+def test_an_escaping_kind_directory_of_a_kind_the_check_judges_skips_the_check():
+    escaped = vault("a", skipped_escaping=1, escaped=[model.EscapedRecord("a", "decision", None)])
+    res = run([escaped, vault("b")])
+    assert isinstance(res, retired.RetiredResult)
+    assert res.skipped == ("a",) and res.judged == {"b": 0}
+
+
+def test_an_escaping_session_record_does_not_skip_the_check():
+    escaped = vault("a", linking("decision", "src", "active", rel("decision", "old")),
+                    rec("a", "decision", "old", "dropped"),
+                    skipped_escaping=1, escaped=[model.EscapedRecord("a", "session", "s")])
+    assert len(single(run([escaped])).retired) == 1
+
+
+def test_an_escaping_kind_directory_skips_that_vault_only_and_the_others_still_report():
+    holder = vault("a", linking("decision", "mine", "active", rel("decision", "old")),
+                   rec("a", "decision", "old", "dropped"),
+                   skipped_escaping=1, escaped=[model.EscapedRecord("a", "decision", None)])
+    other = vault("b", rec("b", "task", "t", "open", {"related": rel("lesson", "old")}),
+                  rec("b", "lesson", "old", "dropped"),
+                  rec("b", "task", "u", "open", {"related": rel("decision", "hidden")}))
+    res = run([holder, other])
+    assert isinstance(res, retired.RetiredResult)
+    assert res.skipped == ("a",)
+    assert res.judged == {"b": 2}
+    assert [(f.vault, f.name, f.target) for f in res.findings] == [("b", "t", "lesson/old")]
+
+
+def test_an_unattributed_escape_still_skips_the_whole_check():
+    res = run([vault("a", skipped_escaping=1), vault("b")])
+    assert res == retired.RetiredSkipped(("a",))
+
+
+def test_a_linker_that_supersedes_a_dropped_target_and_links_to_it_is_not_reported():
+    adr = _adr_superseding(related={"decision": ["old"]})
+    assert run([vault("a", adr, rec("a", "decision", "old", "dropped"))]).findings == []
+    adr = _adr_superseding("replaces [[decision/old]]")
+    assert run([vault("a", adr, rec("a", "decision", "old", "dropped"))]).findings == []
+
+
+def test_the_same_link_to_a_dropped_target_without_the_supersedes_entry_is_reported():
+    adr = rec("a", "adr", "new", "active", {"related": {"decision": ["old"]}})
+    f = single(run([vault("a", adr, rec("a", "decision", "old", "dropped"))]))
+    assert (f.name, f.retired[0].status) == ("new", "dropped")
+
+
+def test_the_relation_lookup_parses_each_candidate_body_once_however_many_linkers(monkeypatch):
+    marks = ("CAND-ONE", "CAND-TWO")
+    cands = [rec("a", "decision", f"old{i}", "superseded", body=f"{marks[i]} [[adr/x]]")
+             for i in range(2)]
+    linkers = [rec("a", "adr", f"l{i}", "active",
+                   {"related": {"decision": ["old0", "old1"]}}) for i in range(5)]
+    scans = [vault("a", *cands, *linkers)]
+    parsed = []
+    real = retired.references.extract_wikilink_lines
+    monkeypatch.setattr(retired.references, "extract_wikilink_lines",
+                        lambda body: parsed.append(body) or real(body))
+    res = run(scans)
+    assert len(res.findings) == 10
+    assert sorted(b for b in parsed if b.startswith("CAND")) == sorted(c.body for c in cands)
+    assert all(c.links_back is False for f in res.findings for c in f.retired)
+
+
+def test_the_relation_lookup_is_per_candidate_not_shared_between_candidates(monkeypatch):
+    linker = rec("a", "adr", "src", "active", {"related": {"decision": ["a1", "a2"]}})
+    a1 = rec("a", "decision", "a1", "superseded", {"related": {"adr": ["src"]}})
+    a2 = rec("a", "decision", "a2", "superseded", {"related": {"adr": ["other"]}})
+    res = run([vault("a", linker, a1, a2)])
+    assert {c.name: c.links_back for f in res.findings for c in f.retired} == {"a1": True, "a2": False}

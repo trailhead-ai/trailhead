@@ -14,6 +14,10 @@
       "Bash(mktemp)",
       "Bash(mktemp *)",
       "Bash(./gather)",
+      "Bash(./gather --json)",
+      "Bash(./answer *)",
+      "Bash(*/scripts/checklist_gather.py --json)",
+      "Bash(*/scripts/checklist_answer.py *)",
       "Bash(*/scripts/found_work.py *)",
       "Bash(*/scripts/covers_gate.py *)",
       "Bash(printf *)",
@@ -33,7 +37,8 @@
       "Bash(git log origin/*)",
       "Bash(git log HEAD --not --remotes=origin -p)",
       "Bash(git push --set-upstream origin HEAD)",
-      "Bash(./git *)"
+      "Bash(./git *)",
+      "Bash(./run-tests)"
     ],
     "max_cost_usd": 10
   },
@@ -267,7 +272,8 @@
         "skills/_shared/escalation.md",
         "skills/slice/SKILL.md",
         "scripts/found_work.py"
-      ]
+      ],
+      "needs_merge_model": "composes a long escalation question graded part by part; the push model drops a different required part each run, unchanged across three wording fixes and four batches"
     },
     "slice-asks-before-dropping-an-urgent-entry-with-a-planted-credential": {
       "measures": [
@@ -734,6 +740,26 @@
         "skills/slice/SKILL.md"
       ],
       "merge_only": true
+    },
+    "tests-a-registered-exporter-by-running-it": {
+      "measures": [
+        "rules.md"
+      ]
+    },
+    "tests-a-changed-default-through-what-it-changes": {
+      "measures": [
+        "rules.md"
+      ]
+    },
+    "adds-a-cli-flag-test-first": {
+      "measures": [
+        "rules.md"
+      ]
+    },
+    "fixes-a-reported-bug-test-first": {
+      "measures": [
+        "rules.md"
+      ]
     }
   }
 }

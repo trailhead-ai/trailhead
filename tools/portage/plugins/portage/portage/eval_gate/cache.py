@@ -6,18 +6,23 @@
   relative path, executable bit and bytes;
 - every regular file of the plan entry's ``measures`` (a path under ``plugin_dir``; a
   directory contributes every regular file under it), by path, executable bit and bytes;
-- every regular file directly under ``<plugin_dir>/evals`` (the corpus's shared scaffolds)
-  except ``eval-gate.json``, by name, executable bit and bytes;
+- every shared file the case uses, by name, executable bit and bytes: a regular file directly
+  under ``<plugin_dir>/evals`` (a corpus's shared scaffolds, its README), except ``eval-gate.json``,
+  whose file name appears as a plain byte substring in any file of the case directory or in a
+  shared file already in the key, followed until nothing new joins. A mention anywhere counts
+  (prose included) and a name inside a longer one matches, so an over-match only re-runs a case;
 - the canonical JSON of the entry's ``runner`` block, ``runs``, ``pass_at``, ``plugin_root``
   and ``case``.
 
 The executable bit is the one mode bit a commit records, so the other permission bits (which a
 checkout's umask sets) are not part of the key. A symlink anywhere among those inputs (a measure
-path, the case directory, ``evals`` or any entry in them) makes the case uncacheable: ``fingerprint``
+path, the case directory, ``evals`` or any entry directly in it) makes the case uncacheable: ``fingerprint``
 returns ``None``, and the caller neither looks the case up nor stores it. Other non-regular files
 are skipped. A plan entry with no ``measures`` key has none. The key leaves out the ``claude`` CLI
-version, scripts outside ``evals/`` that a scaffold calls, and a model alias the runner re-targets:
-none of them change it. Delete the cache directory to force a re-run.
+version, scripts outside ``evals/`` that a scaffold calls, a model alias the runner re-targets, and a
+shared file whose name a scaffold builds at run time and never writes out in full, and a shared
+file named only by another case's files that this case's scaffold runs: none of them change it.
+Delete the cache directory to force a re-run.
 
 The cache is also skipped, neither read nor written, whenever ``PORTAGE_EVAL_RUNNER`` is set (the
 key does not cover which runner produced a pass), and ``run`` stores a fresh pass only when the
@@ -101,6 +106,23 @@ def _regular_files(root: Path, recursive: bool) -> list[Path]:
     return found
 
 
+def _shared_files_used(shared: list[Path], case_files: list[Path]) -> list[Path]:
+    """The ``shared`` files whose names the case files mention, directly or through each other."""
+    texts = [f.read_bytes() for f in case_files]
+    used: list[Path] = []
+    pending = list(shared)
+    grew = True
+    while grew:
+        grew = False
+        for f in list(pending):
+            if any(f.name.encode() in t for t in texts):
+                pending.remove(f)
+                used.append(f)
+                texts.append(f.read_bytes())
+                grew = True
+    return sorted(used)
+
+
 def _feed(h, label: str, path: Path, base: Path) -> None:
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(fd, "rb") as f:
@@ -118,15 +140,16 @@ def fingerprint(plugin_dir: Path, entry: dict) -> str | None:
     h = hashlib.sha256()
     try:
         case_dir = evals / entry["case"]
-        for f in _regular_files(case_dir, True):
+        case_files = _regular_files(case_dir, True)
+        for f in case_files:
             _feed(h, "case", f, case_dir)
         for m in entry.get("measures") or []:
             root = plugin_dir / m
             for f in _regular_files(root, True):
                 _feed(h, "measure", f, plugin_dir)
-        for f in _regular_files(evals, False):
-            if f.name != MAPPING_NAME:
-                _feed(h, "scaffold", f, evals)
+        shared = [f for f in _regular_files(evals, False) if f.name != MAPPING_NAME]
+        for f in _shared_files_used(shared, case_files):
+            _feed(h, "scaffold", f, evals)
     except _Uncacheable:
         return None
     h.update(json.dumps(

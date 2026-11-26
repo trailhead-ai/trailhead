@@ -1641,7 +1641,10 @@ def launched_session_settings(root: Path, outpost_state: Path, workspace: Path) 
     user_settings = Path(env["HOME"]) / ".claude"
     user_settings.mkdir(parents=True, exist_ok=True)
     write_hub_config(HubConfig(name="Hub A", account="a", launch_account="default"), env=env, platform="linux")
-    resolved = resolve_profile(RITUAL_PROFILE, "a", env=env, platform="linux", workspace=str(workspace.resolve()))
+    (Path(env["LORE_STATE_DIR"]) / "vaults" / "work").mkdir(parents=True, exist_ok=True)
+    resolved = resolve_profile(
+        RITUAL_PROFILE, "a", env=env, platform="linux", workspace=str(workspace.resolve()), vault="work"
+    )
     (user_settings / "settings.json").write_text(
         json.dumps(
             {

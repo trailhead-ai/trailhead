@@ -215,3 +215,54 @@ def test_the_check_survives_an_in_place_reload():
     again = load_script("lore.health.stale").check_stale(scans, {"a"}, now=NOW, window_days=30)
     assert len(again.findings) == 1 and again.judged == first.judged
     assert again.findings[0].age_days == first.findings[0].age_days == 99
+
+
+def test_an_escaping_task_skips_the_check_and_an_escaping_session_or_spec_does_not():
+    hidden = lambda kind: model.EscapedRecord("a", kind, "x")  # noqa: E731
+    judged = vault("a", task("t", 99), skipped_escaping=1, escaped=[hidden("task")])
+    assert run([judged]) == stale.StaleSkipped(("a",))
+    for kind in ("session", "spec"):
+        res = run([vault("a", task("t", 99), skipped_escaping=1, escaped=[hidden(kind)])])
+        assert names(res) == ["t"], kind
+
+
+def test_an_escaping_spec_a_task_links_to_is_never_called_retired():
+    escaped = vault("a", skipped_escaping=1, escaped=[model.EscapedRecord("a", "spec", "s")])
+    namesake = vault("b", rec("b", "spec", "s", "dropped"))
+    linker = vault("c", task("t", 1, sidecar=spec_link("s"), vault="c"))
+    assert run([escaped, namesake, linker]).findings == []
+    assert [f.name for f in run([namesake, linker]).findings] == ["t"]
+
+
+def test_a_stale_task_names_the_other_vaults_that_hold_a_task_of_the_same_name():
+    a = vault("a", task("x", days=1, vault="a"))
+    b = vault("b", task("x", days=60, vault="b"))
+    c = vault("c", task("x", days=1, status="done", vault="c"))
+    res = run([a, b, c])
+    assert [(f.vault, f.duplicated_in) for f in res.findings] == [("b", ("a", "c"))]
+
+
+def test_a_stale_task_names_a_vault_whose_same_named_task_is_unreadable():
+    a = vault("a", unreadable=[model.UnreadableRecord("a", "task", "x", "sidecar-malformed")])
+    b = vault("b", task("x", days=60, vault="b"))
+    assert [(f.vault, f.duplicated_in) for f in run([a, b]).findings] == [("b", ("a",))]
+
+
+def test_a_stale_task_names_a_vault_whose_same_named_task_is_kept_as_sidecar_only():
+    a = vault("a", sidecar_only=[model.SidecarOnlyRecord("a", "task", "x", {"status": "open"})])
+    b = vault("b", task("x", days=60, vault="b"))
+    assert [(f.vault, f.duplicated_in) for f in run([a, b]).findings] == [("b", ("a",))]
+
+
+def test_an_unreadable_record_of_another_kind_or_name_is_not_a_namesake():
+    a = vault("a", unreadable=[model.UnreadableRecord("a", "decision", "x", "oversize"),
+                               model.UnreadableRecord("a", "task", "other", "oversize")])
+    b = vault("b", task("x", days=60, vault="b"))
+    assert [(f.vault, f.duplicated_in) for f in run([a, b]).findings] == [("b", ())]
+
+
+def test_a_unique_task_name_has_no_duplicate_vaults():
+    a = vault("a", rec("a", "decision", "y"))
+    b = vault("b", task("y", days=60, vault="b"))
+    res = run([a, b])
+    assert [(f.name, f.duplicated_in) for f in res.findings] == [("y", ())]

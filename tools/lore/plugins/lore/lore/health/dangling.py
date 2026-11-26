@@ -3,15 +3,20 @@
 Pure: takes the scan of every configured vault and returns data. A reference
 dangles when no record with that kind and name exists in any configured vault;
 a bare name dangles only when no record of any kind has it. When any vault was
-not fully read the check is skipped, because nothing can then be confirmed
-missing.
+not fully read, or holds an escape it cannot attribute to a kind, the check is
+skipped, because nothing can then be confirmed missing. A vault holding an escaping
+record or kind directory of a kind the check judges is skipped alone: a reference
+into it is never dangling. An escaping record of another kind skips nothing, and as
+a target it is known to exist.
 """
 
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
+import dataclasses
 from dataclasses import dataclass, field
 
+from ..record.model import KINDS
 from . import references
 from .model import ScannedRecord, VaultScan
 
@@ -45,10 +50,12 @@ class Finding:
 
 @dataclass(frozen=True)
 class DanglingResult:
-    """Findings, and per selected vault the number of records judged."""
+    """Findings, per judged selected vault the number of records judged, and the
+    vaults skipped alone for an escape of a judged kind."""
 
     findings: list[Finding] = field(default_factory=list)
     judged: dict[str, int] = field(default_factory=dict)
+    skipped: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -64,14 +71,20 @@ def check_dangling(
     """Check every selected vault's records against the records of all *scans*.
 
     Session records are skipped unless *include_sessions*."""
-    at_fault = tuple(s.vault for s in scans if not s.fully_read)
+    judged_kinds = KINDS if include_sessions else KINDS - {SESSION_KIND}
+    at_fault = tuple(s.vault for s in scans
+                     if not s.readable_for(judged_kinds) and not s.escapes_in(judged_kinds))
     if at_fault:
         return DanglingSkipped(at_fault)
 
     candidates = references.build_candidates(scans)
 
     result = DanglingResult()
+    skipped: list[str] = []
     for s in scans:
+        if not s.readable_for(judged_kinds):
+            skipped.append(s.vault)
+            continue
         if s.vault not in selected:
             continue
         judged = 0
@@ -94,7 +107,7 @@ def check_dangling(
             for field_label, locations in malformed.items():
                 result.findings.append(_finding(record, field_label, None, tuple(locations)))
         result.judged[s.vault] = judged
-    return result
+    return dataclasses.replace(result, skipped=tuple(skipped))
 
 
 def _other_kinds(
