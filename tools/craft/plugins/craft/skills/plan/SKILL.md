@@ -76,8 +76,8 @@ instead>` is plain words, not a command to paste: for a topic, plan it attended 
 unattended first and plan the slice that comes out; for a task that is not a slice parent, plan it
 attended.
 
-**Entry: the record's latest block.** Once the checks pass, still before anything is written, read
-the parent through `${CLAUDE_PLUGIN_ROOT}/scripts/run_block.py` and decide on its `latest-outcome:`
+**Entry: the record's latest block.** Once the checks pass, still before anything is written, fetch
+the parent's block with `${CLAUDE_PLUGIN_ROOT}/scripts/run_block.py` and decide on its `latest-outcome:`
 and `latest-ritual:` lines by `_shared/unattended.md` (Resume, Whether a run resumes and Which
 ritual resumes), whose refusal words this skill uses as written:
 
@@ -179,7 +179,7 @@ never restates them.
   over an outcome-less block): one `--diff` write closes it and appends the run's own block as above
   together. It logs that the flag was given when the latest block already had an outcome. Earlier
   blocks stay as they are.
-- **Answers.** Read them once with `run_block.py` and handle them as `_shared/unattended.md`
+- **Answers.** Fetch them once with `run_block.py` and handle them as `_shared/unattended.md`
   (Reading answers) says: a matched answer is applied where the resume point below reaches its
   question, an unmatched or missing one is re-parked as a pointer, and an answer to a correction
   question is logged applied, the decision saying the record was not edited and is left for the

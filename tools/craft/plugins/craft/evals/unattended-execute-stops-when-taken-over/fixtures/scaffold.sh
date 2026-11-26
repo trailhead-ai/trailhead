@@ -21,7 +21,7 @@ cat > lore <<'EOW'
 #!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
 printf '%s\n' "$*" >> "$here/lore-calls.log"
-LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"
+CLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"
 rc=$?
 case "$*" in
   *"record update"*"task/count-words"*--diff*)
@@ -38,7 +38,7 @@ cat > bin/lore <<'EOW'
 #!/bin/sh
 here=$(cd "$(dirname "$0")/.." && pwd)
 printf '%s\n' "$*" >> "$here/script-lore-calls.log"
-LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"
+CLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"
 EOW
 # scripts/ is the plugin's scripts directory for this run: each script is a thin wrapper around a real copy, run against bin/lore.
 wrap() {

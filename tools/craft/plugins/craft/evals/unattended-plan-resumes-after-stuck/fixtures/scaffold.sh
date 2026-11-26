@@ -14,7 +14,7 @@ case "$base" in
   /Users/*|/home/*) cp -R "$base" py-home ;;
   *) ln -s "$base" py-home ;;
 esac
-printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nLORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"\n' > lore
+printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nCLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"\n' > lore
 chmod +x lore
 printf "# CLAUDE.md\n\n## Project Maturity\n\nearly\n" > CLAUDE.md
 SPEC='# Totals report
