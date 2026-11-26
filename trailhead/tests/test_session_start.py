@@ -1625,7 +1625,8 @@ def test_hub_start_from_a_foreign_cwd_carries_the_broker_server_helper_and_allow
     assert "--strict-mcp-config" in out["argv"]
     settings = json.loads(_flag_value(out["argv"], "--settings"))
     assert sorted(settings["permissions"]["allow"]) == sorted(
-        f"mcp__{CONTRACT['broker_server']}__{tool}" for tool in (CONTRACT["broker_tool"], CONTRACT["drive_tool"], CONTRACT["release_tool"])
+        f"mcp__{CONTRACT['broker_server']}__{tool}"
+        for tool in (CONTRACT["broker_tool"], CONTRACT["drive_tool"], CONTRACT["release_tool"])
     )
     assert file["mode"] == "0600"
     assert SECRET not in result.stdout
