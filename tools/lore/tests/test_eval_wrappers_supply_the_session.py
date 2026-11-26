@@ -6,9 +6,9 @@ grader can know, while the graders read the case's fixed session. So each case's
 wrappers that supply the case's session themselves, and the model runs the procedure's commands
 exactly as the procedure gives them, with no session flag of its own.
 
-Each test runs a case's real scaffold (one that writes no wrapper is skipped) in a fenced HOME, logs a
-candidate through each wrapper it wrote with the runner's session in the environment and no flag, and
-reads where it landed.
+Each test runs a case's real scaffold in a fenced HOME, logs a candidate through each wrapper it wrote
+with the runner's session in the environment and no flag, and reads where it landed. A scaffold that
+writes no wrapper has nothing to supply a session, so its test ends once the scaffold has built cleanly.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def test_every_wrapper_the_scaffold_writes_logs_to_the_case_session(tmp_path, sc
     assert built.returncode == 0, built.stderr
     wrappers = [w for w in (cwd / "lore", cwd / "bin" / "lore") if w.is_file()]
     if not wrappers:
-        pytest.skip("this case's scaffold writes no lore wrapper")
+        return
 
     for n, wrapper in enumerate(wrappers):
         logged = subprocess.run(
