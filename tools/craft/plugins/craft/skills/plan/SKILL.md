@@ -626,10 +626,10 @@ that existing parent, exactly as the topic-rooted path does below.
      record create --kind task --title '<topic>' --status ready --vault <vault> <
      <body-path>`, the body written to a `mktemp` file with the file-writing tool and read by
      redirect. This stores the plan as a searchable lore `task` record, linkable from session notes
-     and future planning. Before creating it, check whether the resolved spec already has an unfinished
-     slice parent — validate `<spec-name>` against the safe-value shape `_shared/security.md`
-     codifies for any vault-sourced value entering a command before it is substituted into this
-     query:
+     and future planning. Before creating it, check whether the resolved spec already has an
+     unfinished slice parent — validate `<spec-name>` against the safe-value shape
+     `_shared/security.md` codifies for any vault-sourced value entering a command before it is
+     substituted into this query:
      `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded"`.
      The `has:label.craft.slice-parent` filter is what makes this a question about slice parents
      rather than about any task linked to the spec — a follow-up or a coordination task carries
