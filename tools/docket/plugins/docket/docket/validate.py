@@ -1,0 +1,116 @@
+"""Validation of the values a change command takes, before anything is read or written.
+
+Every value is checked here, in order: its shape first (no lore call at all), then the vault it names
+against the configured vaults (one `lore vault ls` call, which also locates the default vault), then,
+for an add, the record's kind through `lore record show`. A failure raises `Refused`, which the
+change commands report as the outcome `refused` with exit 2 and nothing written.
+
+A REF is `<vault>/<kind>/<slug>`: exactly three non-empty parts, no value begins with a dash, and
+kind and slug use the store's own validators (lowercase letters, digits, `.`, `_`, `-`). A workspace
+is `GROUP/SLUG` under the same rule. The store validates again on every path it opens.
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+from typing import NamedTuple, Sequence
+
+from docket.errors import DocketError
+from docket.store import (
+    Runner, StoreError, UnsafeNameError, Workspace, locate_default_vault, validate_kind, validate_slug,
+    validate_vault_name,
+)
+
+NOTE_KEYWORD = "note"
+LISTABLE_KINDS = ("spec", "task")
+
+
+class Refused(DocketError):
+    """A value or request the change commands refuse; nothing was written."""
+
+    def __init__(self, message: str, entries: Sequence[dict] = ()) -> None:
+        super().__init__(message)
+        self.entries = list(entries)
+
+
+class Ref(NamedTuple):
+    vault: str
+    kind: str
+    slug: str
+
+    @property
+    def text(self) -> str:
+        return f"{self.vault}/{self.kind}/{self.slug}"
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return (self.kind, self.slug)
+
+
+def _no_dash(value: str) -> None:
+    if value.startswith("-"):
+        raise Refused(f"{value!r} begins with a dash; pass values after --")
+
+
+def parse_ref(value: str) -> Ref:
+    _no_dash(value)
+    parts = value.split("/")
+    if len(parts) != 3 or not all(parts):
+        raise Refused(f"{value!r} is not a REF; expected <vault>/<kind>/<slug> with no empty part")
+    try:
+        return Ref(validate_vault_name(parts[0]), validate_kind(parts[1]), validate_slug(parts[2]))
+    except UnsafeNameError as exc:
+        raise Refused(str(exc)) from exc
+
+
+def parse_workspace(value: str) -> Workspace:
+    _no_dash(value)
+    parts = value.split("/")
+    if len(parts) != 2 or not all(parts):
+        raise Refused(f"{value!r} is not a workspace; expected GROUP/SLUG")
+    try:
+        return Workspace(validate_slug(parts[0]), validate_slug(parts[1]))
+    except UnsafeNameError as exc:
+        raise Refused(str(exc)) from exc
+
+
+class Vaults(NamedTuple):
+    names: tuple[str, ...]
+    default_name: str
+    default_path: Path
+
+
+def configured_vaults(runner: Runner) -> Vaults:
+    proc = runner(["lore", "vault", "ls", "--json"])
+    path = locate_default_vault(lambda _argv: proc)
+    rows = json.loads(proc.stdout)
+    default = next(r["name"] for r in rows if r.get("scope") == "default")
+    return Vaults(tuple(r["name"] for r in rows), default, path)
+
+
+def require_configured(vaults: Vaults, refs: Sequence[Ref]) -> None:
+    for ref in refs:
+        if ref.vault not in vaults.names:
+            raise Refused(f"vault {ref.vault!r} is not one of the configured vaults ({', '.join(vaults.names)})")
+
+
+def check_kind(runner: Runner, ref: Ref) -> None:
+    """Refuse a record that does not resolve, or is not a spec, a task or a blob keyworded `note`."""
+    refusal = None
+    try:
+        proc = runner(["lore", "record", "show", "--json", "--vault", ref.vault, f"{ref.kind}/{ref.slug}"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise StoreError(f"cannot look up {ref.text}: {exc}") from exc
+    if proc.returncode != 0:
+        refusal = f"{ref.text} does not resolve to a record"
+    else:
+        try:
+            sidecar = json.loads(proc.stdout)["sidecar"]
+            keywords = sidecar.get("keywords") or []
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise Refused(f"{ref.text}: lore printed a record that cannot be read") from None
+        if ref.kind in LISTABLE_KINDS or (ref.kind == "blob" and NOTE_KEYWORD in keywords):
+            return
+        refusal = f"{ref.text} is not a spec, a task or a note; the docket holds only those"
+    raise Refused(refusal, [{"ref": ref.text, "status": "refused"}])

@@ -60,7 +60,7 @@ lore-camp = ["tools/lore/tests", "tools/camp/tests"]
 # `scripts/inert-test-gate` fails when a test carrying the tier's marker sits outside them.
 [tool.trailhead.test-tiers]
 chromium = ["tools/outpost/tests"]
-seam_real = ["trailhead/tests", "tools/craft/tests", "tools/lore/tests"]
+seam_real = ["trailhead/tests", "tools/craft/tests", "tools/lore/tests", "tools/docket/tests"]
 
 [tool.ruff]
 # PEP 8 style enforcement. PEP 8 explicitly allows teams to relax the 79-column

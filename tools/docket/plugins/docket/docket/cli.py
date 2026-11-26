@@ -5,7 +5,8 @@ parser from the table, so nothing else changes.
 
 Error convention: a failure prints ``docket: <message>`` on stderr and exits nonzero, never a
 traceback. A command signals one by raising ``DocketError`` (exit 1); a usage error (unknown
-command or flag) exits 2.
+command or flag) exits 2. A command that reports a result instead of failing returns its own exit
+code from ``run`` (the change commands use 0, 2, 3 and 4) and ``main`` passes it through.
 """
 from __future__ import annotations
 
@@ -53,3 +54,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except DocketError as exc:
         print(f"docket: {exc}", file=sys.stderr)
         return 1
+
+
+from docket import changes  # noqa: E402  (the table is complete only once the commands register)
+
+COMMANDS.update(changes.make_commands())
