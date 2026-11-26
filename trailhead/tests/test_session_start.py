@@ -1553,6 +1553,7 @@ def test_the_drive_constants_match_the_contract_fixture():  # inert-gate: allow 
 
     assert {
         "drive_tool": lp.DRIVE_TOOL,
+        "release_tool": lp.RELEASE_TOOL,
         "ritual_role": lp.RITUAL_ROLE,
         "sessions_tmux_socket": lp.SESSIONS_SOCKET,
         "ritual_session_pattern": lp.RITUAL_SESSION_PATTERN,
@@ -1561,7 +1562,7 @@ def test_the_drive_constants_match_the_contract_fixture():  # inert-gate: allow 
         "setup_sandbox_keys": list(lp.SETUP_SANDBOX_KEYS),
         "drive_groups_output_keys": list(lp.DRIVE_GROUPS_OUTPUT_KEYS),
     } == {k: CONTRACT[k] for k in (
-        "drive_tool", "ritual_role", "sessions_tmux_socket", "ritual_session_pattern",
+        "drive_tool", "release_tool", "ritual_role", "sessions_tmux_socket", "ritual_session_pattern",
         "task_wrapper_env", "task_wrapper_placeholders", "setup_sandbox_keys", "drive_groups_output_keys",
     )}
 
@@ -1624,7 +1625,7 @@ def test_hub_start_from_a_foreign_cwd_carries_the_broker_server_helper_and_allow
     assert "--strict-mcp-config" in out["argv"]
     settings = json.loads(_flag_value(out["argv"], "--settings"))
     assert sorted(settings["permissions"]["allow"]) == sorted(
-        f"mcp__{CONTRACT['broker_server']}__{tool}" for tool in (CONTRACT["broker_tool"], CONTRACT["drive_tool"])
+        f"mcp__{CONTRACT['broker_server']}__{tool}" for tool in (CONTRACT["broker_tool"], CONTRACT["drive_tool"], CONTRACT["release_tool"])
     )
     assert file["mode"] == "0600"
     assert SECRET not in result.stdout
@@ -2507,6 +2508,11 @@ def test_the_hub_drives_a_spec_through_outpost_never_the_in_session_driver(tmp_p
     hub = _settings_of(_start(_fence(tmp_path)))["permissions"]
     assert "Skill(craft:drive)" in hub["deny"]
     assert f"mcp__{CONTRACT['broker_server']}__{CONTRACT['drive_tool']}" in hub["allow"]
+
+
+def test_the_hub_may_release_its_paused_drive_without_a_prompt(tmp_path):
+    hub = _settings_of(_start(_fence(tmp_path)))["permissions"]
+    assert f"mcp__{CONTRACT['broker_server']}__{CONTRACT['release_tool']}" in hub["allow"]
 
 
 def test_ritual_launch_never_prompts(tmp_path):

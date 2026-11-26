@@ -16,6 +16,7 @@
   "broker_credential_fields": ["client_id", "client_secret"],
   "broker_session_id_pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
   "drive_tool": "drive_spec",
+  "release_tool": "release_drive",
   "ritual_role": "ritual",
   "sessions_tmux_socket": "outpost-sessions",
   "ritual_session_pattern": "ritual-<hex>",
