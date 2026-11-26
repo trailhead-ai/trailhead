@@ -1,0 +1,7 @@
+---
+type: regex
+pattern: '^\{\s*"version":\s*1,\s*"entries":\s*\[\s*\{\s*"kind":\s*"spec",\s*"slug":\s*"tide-table-import"\s*\},\s*\{\s*"kind":\s*"task",\s*"slug":\s*"crew-roster-export"\s*\},\s*\{\s*"kind":\s*"spec",\s*"slug":\s*"mooring-fee-tiers"\s*\},\s*\{\s*"kind":\s*"task",\s*"slug":\s*"replace-the-gangway-sensor"\s*\},\s*\{\s*"kind":\s*"task",\s*"slug":\s*"harbour-map-tiles",\s*"workspace":\s*\{\s*"group":\s*"eval",\s*"slug":\s*"harbour-map-tiles"\s*\}\s*\},\s*\{\s*"kind":\s*"task",\s*"slug":\s*"dock-camera-firmware"\s*\}\s*\]\s*\}\s*$'
+target:
+  source: file
+  path: vault/sites/docket/lists/eval.json
+---

@@ -1,0 +1,22 @@
+#!__PYTHON__
+"""A stand-in for camp in the docket eval runs: it answers `camp list` from camp-state/list.json and `camp new` with a workspace path, and logs every call."""
+import json
+import os
+import sys
+
+here = os.path.dirname(os.path.abspath(__file__))
+state = os.path.join(here, "camp-state")
+args = sys.argv[1:]
+with open(os.path.join(state, "calls.log"), "a", encoding="utf-8") as log:
+    log.write(" ".join(args) + "\n")
+
+if args[:1] == ["list"]:
+    with open(os.path.join(state, "list.json"), encoding="utf-8") as src:
+        sys.stdout.write(src.read())
+    sys.exit(0)
+if args[:1] == ["new"] and len(args) > 1 and "--json" in args:
+    group = args[args.index("--group") + 1] if "--group" in args else "eval"
+    print(json.dumps({"workspace": os.path.join(here, "workspaces", group, args[1])}))
+    sys.exit(0)
+print("camp: unsupported call in the eval stand-in", file=sys.stderr)
+sys.exit(2)

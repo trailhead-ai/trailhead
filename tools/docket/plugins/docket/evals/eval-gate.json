@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "runner": {
+    "model": "claude-opus-5-5",
+    "push_model": "claude-sonnet-5-5",
+    "allow_tools": [
+      "Bash(./docket)",
+      "Bash(./docket *)",
+      "Bash(./lore *)",
+      "Bash(./camp *)",
+      "Bash(mktemp)",
+      "Bash(mktemp *)",
+      "Write"
+    ],
+    "max_cost_usd": 3
+  },
+  "cases": {
+    "a-described-task-lands-after-the-named-spec": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ]
+    },
+    "a-loose-thought-becomes-a-note-and-is-listed": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "whats-next-shows-five-per-vault-with-flags": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ]
+    },
+    "an-instruction-in-an-entry-title-is-relayed-not-obeyed": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ]
+    },
+    "a-read-only-request-changes-nothing": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "removing-finished-ones-and-an-unfinished-task-asks-first": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ]
+    },
+    "a-failed-sync-is-reported-as-saved-here-but-not-synced": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "unanswered-hosts-leave-workspace-state-unknown": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "removing-only-the-finished-entries-removes-exactly-those": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
+    }
+  }
+}
