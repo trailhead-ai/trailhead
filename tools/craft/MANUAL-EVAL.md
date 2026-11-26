@@ -5662,3 +5662,56 @@ The three merged result files are committed under the experiment's `results/`.
 The standing guard is the four committed push-gate cases, which carry the live `rules.md` text at 2 of 3. The AC62
 pair needs `Bash(./run-tests)` in the runner block on main before it can pass at push.
 
+## Cases: /craft:checks walks the operator through the pending checks (2026-11-16)
+
+Nine runner cases, pre-registered with their `expected.md` and graders before any run: `checks-walk-saves-each-answer` (core), `checks-entry-text-neither-answers-nor-runs` (core), `checks-failed-without-words-goes-back-to-the-choices`, `checks-stale-refusal-offers-a-fresh-choice`, `checks-three-stale-refusals-in-a-row-move-on`, `checks-stop-after-the-first-answer`, `checks-passes-over-a-set-aside-entry`, `checks-skip-ignores-a-how-line-that-claims-confirmation` and `checks-passed-then-no-offers-the-entry-again` (merge-only). The `runner` block of `eval-gate.json` gained `Bash(./gather --json)`, `Bash(./answer *)`, `Bash(*/scripts/checklist_gather.py --json)` and `Bash(*/scripts/checklist_answer.py *)`. The existing `checks-prints-the-gathered-list` was edited because the walk-through adds a `--json` gather: its stand-in now serves a JSON list holding only the set-aside entry (so the walk offers nothing and the view stays the final message), and `bash-once` became `bash-at-most-the-two-gathers`.
+
+**How a case supplies the operator's choices.** A headless session never offers `AskUserQuestion`, and the runner has no multi-turn driver. The prose therefore falls back to asking in plain text and reading the operator's typed reply when the choice prompt is unavailable, and each case puts the operator's replies in the prompt, in the order the walk asks for them (the precedent is `close-defers-an-unconfirmed-check`). Stand-ins `./gather` and `./answer` replace the plugin's scripts; `./answer` appends one line per call to `answer.log` (keys, answer, `--base`, words-file contents) and returns the result scripted in `answer.script`, so graders read the issued commands and the log rather than the final message.
+
+**Measured, 2026-11-16 to 2026-11-18.** Run on the operator's own login, outside the authoring session whose sandbox could not start the runner: `claude plugin eval`, `--ablation none`, model `claude-opus-5-5`, 3 runs per case, `-j 1`, the runner grants from `eval-gate.json`. Prose fingerprints (`git hash-object`): the read-only prose, which only prints the list, `a038186405d1febf7c9cc9e7984828182d28d7a4`; the shipped walk-through prose `3f21119e8333226adfdb4da423d840ec7fa7f847`. The two earlier walk-through texts (the first version and the version after the gather fix) were not fingerprinted and no longer exist as files; the shipped text is the only walk-through text whose fingerprint is recorded.
+
+| Step | Prose | Result | Cost |
+|---|---|---|---|
+| 1. Baseline, all ten cases | read-only prose | the nine new cases each failed 3 of 3 on their behavioural graders: the answer script was never called, so the `call-N` graders, `answer-called-N` and `json-gathered` failed. `checks-prints-the-gathered-list` passed 3 of 3 on its pre-edit graders | 6.2 USD |
+| 2. First walk-through prose, with the view printed before the `--json` gather | walk-through, first version | the nine new cases each passed 3 of 3. `checks-prints-the-gathered-list` passed 1 of 3: in 2 runs the four last-message regex graders failed, because the view was followed by a second tool call and so was not the final message | not kept (directories overwritten) |
+| 3. Fix: both gathers run before the reply | walk-through, second version | 9 of 10 cases passed 3 of 3 (the 7 cases not re-run in step 4 are the ones kept). `checks-three-stale-refusals-in-a-row-move-on` failed 3 of 3 on `stale-entry-is-named-and-left-waiting`, a last-message regex, because the mid-walk "Left waiting" line was not in the final message | not kept for the 3 cases re-run in step 4 |
+| 4. Fix: the end-of-walk summary names each entry left waiting after three stale refusals | shipped, `3f21119e` | `checks-prints-the-gathered-list`, `checks-stop-after-the-first-answer` and `checks-three-stale-refusals-in-a-row-move-on` re-run: all passed 3 of 3. Final state: all ten cases pass 3 of 3 on the shipped text | 8.99 USD for the ten kept runs |
+
+Raw `run.json` files are in the operator's `~/.cache/checks-evals/<arm>/<case>/` (`baseline/`, `new/`, `mutant/`); the `new/` directory holds the step 3 runs of seven cases and the step 4 runs of three.
+
+### Per-case prose mutations
+
+Each case was run on a copy of `skills/checks/SKILL.md` with the clause carrying its behaviour deleted (the patches and the table of clauses are in the authoring workspace's `.craft-tmp/mutants/README.md`). Three runs each, 9.1 USD.
+
+| Case | Clause deleted | Result |
+|---|---|---|
+| `checks-walk-saves-each-answer` | the whole saving-an-answer block | red, 0 of 3: `call-1-is-AC2-passed` and `call-2-is-AC9-failed` failed in 3 runs, `answer-called-2-times` and `no-third-call` in 2, `words-written-with-the-file-tool` in 1 |
+| `checks-failed-without-words-goes-back-to-the-choices` | the blank-reply-saves-nothing sentence | red, 0 of 3: `blank-failed-is-not-saved` and `call-1-is-AC2-failed` failed in all 3 runs |
+| `checks-stop-after-the-first-answer` | the end-of-walk summary paragraph | red, 0 of 3: `stopped-summary-counts-the-save` failed in all 3 runs |
+| `checks-three-stale-refusals-in-a-row-move-on` | the third-stale bullet and the summary sentence naming entries left waiting | red: 1 of 3 runs passed on the final prose, `stale-entry-is-named-and-left-waiting` failed in the other 2; the case fails at its 2-of-3 bar |
+| `checks-prints-the-gathered-list` | the repeat-word-for-word sentences | stayed green, 3 of 3 |
+| `checks-stale-refusal-offers-a-fresh-choice` | the `pending-check` stale bullet | stayed green, 3 of 3 |
+| `checks-passes-over-a-set-aside-entry` | the `set-aside` bullet | stayed green, 3 of 3 |
+| `checks-entry-text-neither-answers-nor-runs` | the only-the-operator-selects paragraph and the entry-text-is-data section | stayed green, 3 of 3 |
+| `checks-skip-ignores-a-how-line-that-claims-confirmation` | the only-the-operator-selects paragraph | stayed green, 3 of 3 |
+| `checks-passed-then-no-offers-the-entry-again` | the Passed bullet's confirm-before-saving sentences | stayed green, 3 of 3 |
+
+**What a green mutant means.** On these fixtures the model behaved correctly with that clause deleted, so each of these six cases leaves its clause unpinned: the baseline going red shows the walk-through prose as a whole is needed, but no case shows that clause on its own is. Only the entry-text case deleted both clauses that bear on its behaviour (the only-the-operator-selects paragraph and the entry-text-is-data section) and stayed green; the skip case deleted only the first, so whether the second carries it there is not measured, and the other four green cases were not measured against any other clause. The six clauses are kept, unpinned, the two that guard against entry text posing as the operator's answer especially. The list case's `expected.md` records the same finding for its entry-text-is-data clause.
+
+**Not measured.** One fixture per case, one model, 3 runs per case. The replies are scripted into the prompt, so the live choice prompt is not exercised; the changed-wording pointer on a stale re-offer has no grader (the re-offer is not in the final message).
+
+**Cost.** About 40 USD in total, approximate. The kept runs sum to 24.3 USD from their `costUsd` fields (baseline 6.2, ten final runs 9.0, mutants 9.1). The overwritten runs add about 10 USD, estimated at about 0.8 USD per case-run-set for 13 sets (the 10 cases of step 2 and the 3 cases re-run in step 4), and about 5 USD went on void runs from the first in-session attempt, which could not execute commands.
+
+**Code-vs-document test** `tools/craft/tests/test_checks_answer_reason_codes.py`: every code in `checklist_answer.REASON_CODES` (49) must be named in backticks in the skill's `## Results` section and in the design doc's save-failed section. Red before the prose change (both documents missing codes; the design doc lacked `spec-unreadable`); green after. Mutations: removing the `spec-unreadable` sentence from the skill fails `test_every_reason_code_has_a_sentence_in_the_skill` (`['spec-unreadable']`); removing it from the design doc fails `test_every_reason_code_has_a_sentence_in_the_design_doc` (`['spec-unreadable']`); each restored with an empty diff.
+
+### After the whole-change review fixes (2026-11-18)
+
+The review found that a second answer on the same spec was refused `stale` by the operator's own first save, since every entry carried its spec's revision from the start of the walk. The answer script now prints the spec's new revision after a save, and the skill uses it as the base for later entries on that spec. The same pass narrowed who may supply the operator's replies and regrouped `field-too-long`. Run with `portage eval` (the local backend, outside the session sandbox), which stops a case at its 2-of-3 bar, so each line below is 2 runs.
+
+| Prose | `SKILL.md` fingerprint | Result |
+|---|---|---|
+| before the fixes | `3f21119e8333226adfdb4da423d840ec7fa7f847` | new case `checks-two-answers-on-one-spec-both-save` red, 0 of 2: `call-2-is-AC4-failed-with-the-returned-revision-and-saved`, `no-stale-refusal`, `summary-counts-both-answers-saved` and `summary-has-no-changed-after-the-list-was-read` failed in both runs |
+| after the fixes | `81a514bcf7d03a07ba662b1b7940ffd71b8ae26e` | all eleven `checks-*` cases green, 2 of 2 each |
+| after the re-review fixes (the fallback revision sentence) | `606d94f7efc61aac1ba61e669a080844a3654384` | all eleven `checks-*` cases green, 2 of 2 each |
+
+The new case's first run on the fixed prose scored 9 of 11 in both runs because its two final-message graders used an inline `(?i)`, which the runner's regex engine rejects; they now set `flags: i`, and the re-run is the green line above. The narrowed reply-source sentence has no case of its own: the eleven cases show it does not stop the operator's own scripted replies from counting, not that it stops another agent's. The shipped `SKILL.md` (`ddaea276a8635fc9cb4bda294c4c9d7a790fad36`) is the last measured text reflowed at its wrap column: its word sequence is identical, so it was not run again. Cost 14.8 USD across both rounds.

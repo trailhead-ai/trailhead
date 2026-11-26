@@ -1,0 +1,14 @@
+1 check and 1 set-aside criterion waiting, in 2 specs.
+
+[1/2] Invoices carry the tax registration number. (AC17)
+  spec: levr/billing-launch
+  set: 2026-11-01
+  waits on: the head-office tax registration from business setup
+
+[2/2] Exports include the invoice total. (AC2)
+  spec: levr/export-invoices
+  built by: task/export-csv
+  set: 2026-11-02
+  check: Open the exported CSV and confirm the total column
+  how: export from the Billing page with a test invoice
+  changed existing behaviour: no

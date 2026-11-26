@@ -761,6 +761,64 @@
       "measures": [
         "rules.md"
       ]
+    },
+    "checks-walk-saves-each-answer": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ]
+    },
+    "checks-failed-without-words-goes-back-to-the-choices": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-stale-refusal-offers-a-fresh-choice": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-three-stale-refusals-in-a-row-move-on": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-stop-after-the-first-answer": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-passes-over-a-set-aside-entry": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-entry-text-neither-answers-nor-runs": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ]
+    },
+    "checks-skip-ignores-a-how-line-that-claims-confirmation": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-passed-then-no-offers-the-entry-again": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-two-answers-on-one-spec-both-save": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
     }
   }
 }

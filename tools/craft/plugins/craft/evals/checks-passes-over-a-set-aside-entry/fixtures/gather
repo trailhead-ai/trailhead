@@ -1,0 +1,12 @@
+#!/bin/sh
+d=$(dirname "$0")
+if [ "$1" = "--json" ]; then
+  n=$(cat "$d/gather.count" 2>/dev/null || echo 0)
+  n=$((n + 1))
+  echo "$n" > "$d/gather.count"
+  f="$d/gather.$n.json"
+  [ -f "$f" ] || f="$d/gather.json"
+  cat "$f"
+else
+  cat "$d/gather.out"
+fi
