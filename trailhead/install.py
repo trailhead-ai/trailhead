@@ -359,6 +359,7 @@ def resolve_config_for_env(
     no_camp: bool = False,
     no_lore: bool = False,
     no_portage: bool = False,
+    no_docket: bool = False,
 ):
     """Resolve the install config: config file + CLI overrides + detection.
 
@@ -380,6 +381,7 @@ def resolve_config_for_env(
         no_camp=no_camp,
         no_lore=no_lore,
         no_portage=no_portage,
+        no_docket=no_docket,
         detected_harnesses=detected,
     )
 
@@ -392,6 +394,7 @@ def run_install(
     no_camp: bool = False,
     no_lore: bool = False,
     no_portage: bool = False,
+    no_docket: bool = False,
     env: dict[str, str] | None = None,
     quiet: bool = False,
     as_json: bool = False,
@@ -415,6 +418,7 @@ def run_install(
             no_camp=no_camp,
             no_lore=no_lore,
             no_portage=no_portage,
+        no_docket=no_docket,
         )
     except (ConfigResolveError, UnknownSubagentError, UnknownSkillError) as exc:
         print(f"trailhead: {exc}", file=sys.stderr)

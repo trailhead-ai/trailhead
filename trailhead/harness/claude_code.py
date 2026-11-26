@@ -577,6 +577,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         "Portable software-development plugin: general-purpose dev agents and dev-ritual skills."
     ),
     "portage": ("Get the PR merged: PR lifecycle, CI watch, and merge ordering for a camp group."),
+    "docket": ("The docket tool: keep a project's docket from the terminal in any session."),
 }
 
 

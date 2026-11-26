@@ -110,6 +110,7 @@ class TestDetectionDrivenInstall:
             "portage",
             "outpost",
             "trailhead",
+            "docket",
         }
 
     def test_clis_installed(self, tmp_path):
@@ -123,6 +124,7 @@ class TestDetectionDrivenInstall:
             "camp",
             "lore",
             "portage",
+            "docket",
             "ranger",
             "trailhead",
             "outpost-gateway",
@@ -190,6 +192,13 @@ class TestCliOverrides:
         assert "camp" in cli_tools
         assert "lore" in cli_tools
 
+    def test_no_docket_skips_docket_cli(self, tmp_path):
+        with _patched(detected=True) as m:
+            run_install(env=_env(tmp_path), no_docket=True, quiet=True)
+        cli_tools = m["pathint"].call_args[0][0]
+        assert "docket" not in cli_tools
+        assert "portage" in cli_tools
+
     def test_config_can_drop_a_cli_with_no_matching_flag(self, tmp_path):
         # Every CLI-bearing tool's install_<name>_cli key is resolved
         # generically off its manifest, so a config file can drop a CLI
@@ -209,6 +218,7 @@ class TestCliOverrides:
                 no_camp=True,
                 no_lore=True,
                 no_portage=True,
+                no_docket=True,
                 quiet=True,
             )
         m["pathint"].assert_not_called()
@@ -275,6 +285,7 @@ class TestJsonOutput:
             "camp": True,
             "lore": True,
             "portage": True,
+            "docket": True,
         }
 
     def test_json_no_harness_flag(self, tmp_path, capsys):
@@ -418,6 +429,7 @@ class TestShellenvGuidance:
                 no_camp=True,
                 no_lore=True,
                 no_portage=True,
+                no_docket=True,
                 quiet=True,
             )
         m["pathint"].assert_not_called()
@@ -440,7 +452,7 @@ class TestShellenvGuidance:
             "trailhead.install.trailhead_bin_executable", return_value=True
         ):
             run_install(
-                env=_env(tmp_path), no_camp=True, no_lore=True, no_portage=True, quiet=True
+                env=_env(tmp_path), no_camp=True, no_lore=True, no_portage=True, no_docket=True, quiet=True
             )
         m["pathint"].assert_not_called()
         path_line = next((ln for ln in capsys.readouterr().out.splitlines() if "on your PATH" in ln), "")

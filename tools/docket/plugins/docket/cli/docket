@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""The `docket` CLI entry point — a thin shim over ``docket.cli.main``.
+
+Puts the plugin root (this file's ``../``) on ``sys.path`` so the sibling ``docket`` package is
+importable whether run from the repo or an installed plugin
+(``${CLAUDE_PLUGIN_ROOT}/cli/docket``). All command logic lives in the ``docket`` package.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# cli/docket -> parent is cli/ -> parent is plugins/docket/ (the plugin root).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from docket.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

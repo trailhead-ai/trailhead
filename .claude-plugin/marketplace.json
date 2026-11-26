@@ -31,6 +31,11 @@
       "description": "Publish multi-file static sites into a shared lore vault's sites/ tree, so every teammate can view them from their own local Outpost."
     },
     {
+      "name": "docket",
+      "source": "./tools/docket/plugins/docket",
+      "description": "The docket tool: keep a project's docket from the terminal in any session."
+    },
+    {
       "name": "trailhead",
       "source": "./tools/trailhead/plugins/trailhead",
       "description": "Self-update notice: tells a session when its trailhead install is behind its source checkout, with the changelog delta."
