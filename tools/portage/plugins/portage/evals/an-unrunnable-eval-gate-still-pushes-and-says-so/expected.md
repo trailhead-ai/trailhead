@@ -26,3 +26,7 @@ Predicted baseline: the committed updater pushes but has no gate, so `pushed` ho
 - The gate is real; the runner is a fake binary, so this measures the updater's obedience, not the runner.
 - The final reply's `**Eval gate:**` line is not graded here; it is covered by the live check in `MANUAL-EVAL.md`.
 - One model tier for the dispatched updater.
+
+## Deviation from pre-registration (2026-11-25): the gate is opt-in
+
+The eval gate is now off unless the group setting or the run turns it on, so this case opts in (the prompt passes `eval_gate: on`). It measures the same behaviour as before; no grader and no bar changed.

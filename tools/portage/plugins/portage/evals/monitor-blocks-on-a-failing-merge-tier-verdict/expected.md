@@ -30,3 +30,7 @@ Predicted baseline: the committed monitor merges without a gate, so `gate-ran-to
 - The runner's sandbox refuses a Bash write redirect, so the outcome file is never created; the outcome clause matches monitor's write command (the line and the file it is redirected to), not the file.
 - The dispatch lists no reason tokens, so the prose itself has to supply `eval-gate-failed`; a dispatch that lists them (the PR step's does) is an easier case than this one.
 - The recovery wording (fix the prose or the case and push) is not graded.
+
+## Deviation from pre-registration (2026-11-25): the gate is opt-in
+
+The eval gate is now off unless the group setting or the run turns it on, so this case opts in (the prompt passes `eval_gate: on`). It measures the same behaviour as before; no grader and no bar changed.

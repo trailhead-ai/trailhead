@@ -139,7 +139,10 @@ REASONS = {
 _STEP = re.compile(r"^[a-z][a-z0-9-]{0,31}\Z")
 _GRADER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 _STATUSES = ("cases-selected", "no-cases-mapped", "base-unresolved", "base-invalid", "mapping-invalid",
-             "tree-dirty")
+             "tree-dirty", "gate-off")
+
+GATE_OFF = ("The eval gate is off for this group, so no cases were run. To run it for one PR, use "
+            "`/portage:pull_request create --eval-gate` (or `update` or `monitor` with `--eval-gate`).")
 
 BASE_INVALID = "the base must not start with '-'"
 
@@ -441,6 +444,8 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     plan = _load_plan(state)
     status = plan["status"]
 
+    if status == "gate-off":
+        return 0, ["eval-gate: off", "persistent: none"], _wrap([GATE_OFF])
     if status == "mapping-invalid":
         bad = plan.get("mapping_invalid") if isinstance(plan.get("mapping_invalid"), dict) else {}
         file, fault = _corpus(bad.get("file")), _safe_fault(bad.get("fault", "unspecified"))

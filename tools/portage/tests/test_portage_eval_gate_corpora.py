@@ -122,7 +122,7 @@ def _merge_only(corpus: Path) -> set[str]:
 
 def _selected(repo: Path, capsys, *tier: str) -> tuple[str, list[str]]:
     capsys.readouterr()
-    dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--base", "main", *tier])
+    dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--opt-in", "--base", "main", *tier])
     out = capsys.readouterr().out
     status = next(ln for ln in out.splitlines() if ln.startswith("status: "))[len("status: "):]
     cases = sorted(

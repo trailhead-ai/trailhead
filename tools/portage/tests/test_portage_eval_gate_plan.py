@@ -72,9 +72,10 @@ def _branch(repo: Path) -> None:
     _git(repo, "checkout", "-b", "feature")
 
 
-def _plan(repo: Path, capsys, *extra: str):
+def _plan(repo: Path, capsys, *extra: str, opt_in: bool = True):
     capsys.readouterr()
-    rc = dispatch.main(["eval-gate", "plan", "--repo", str(repo), *extra])
+    gate = ["--opt-in"] if opt_in else []
+    rc = dispatch.main(["eval-gate", "plan", "--repo", str(repo), *gate, *extra])
     out = capsys.readouterr().out
     state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
     plan = json.loads((state / "plan.json").read_text())
@@ -333,9 +334,65 @@ class TestLookupAndStateDir:
         assert stat.S_IMODE(os.stat(state).st_mode) == 0o700
 
 
+class TestGateOptIn:
+    def _touching_a(self, repo):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+
+    def _toml(self, tmp_path, text):
+        path = tmp_path / "group.toml"
+        path.write_text(text)
+        return str(path)
+
+    def test_no_flag_and_no_setting_writes_a_gate_off_plan_with_no_cases(self, repo, capsys):
+        self._touching_a(repo)
+        rc, plan, out = _plan(repo, capsys, "--base", "base", opt_in=False)
+        assert rc == 0
+        assert plan["status"] == "gate-off"
+        assert plan["cases"] == []
+        assert "status: gate-off" in out.splitlines()
+        assert "cases: 0" in out
+
+    def test_opt_in_selects_the_touched_cases(self, repo, capsys):
+        self._touching_a(repo)
+        rc, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert rc == 0
+        assert plan["status"] == "cases-selected"
+        assert _names(plan) == ["alpha"]
+
+    @pytest.mark.parametrize("text, status", [
+        ("[release]\neval_gate = true\n", "cases-selected"),
+        ("[release]\neval_gate = false\n", "gate-off"),
+        ("[release]\n", "gate-off"),
+        ("[release]\neval_gate = \"true\"\n", "gate-off"),
+        ("[release]\neval_gate = 1\n", "gate-off"),
+        ("[release\neval_gate = true\n", "gate-off"),
+    ])
+    def test_the_group_setting_alone_decides(self, repo, tmp_path, capsys, text, status):
+        self._touching_a(repo)
+        toml = self._toml(tmp_path, text)
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--group-toml", toml, opt_in=False)
+        assert plan["status"] == status
+
+    def test_a_missing_group_file_reads_as_off(self, repo, tmp_path, capsys):
+        self._touching_a(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base",
+                           "--group-toml", str(tmp_path / "absent.toml"), opt_in=False)
+        assert plan["status"] == "gate-off"
+
+    def test_opt_in_wins_over_a_group_that_is_off(self, repo, tmp_path, capsys):
+        self._touching_a(repo)
+        toml = self._toml(tmp_path, "[release]\neval_gate = false\n")
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--group-toml", toml)
+        assert plan["status"] == "cases-selected"
+
+
 class TestUsage:
     def test_a_path_that_is_not_a_git_repo_exits_2(self, tmp_path, capsys):
-        rc = dispatch.main(["eval-gate", "plan", "--repo", str(tmp_path)])
+        rc = dispatch.main(["eval-gate", "plan", "--repo", str(tmp_path), "--opt-in"])
         assert rc == 2
         assert capsys.readouterr().err.strip()
 
@@ -2190,7 +2247,7 @@ class TestNonUtf8Path:
 
     def test_plan_refuses_a_committed_path_that_is_not_utf8_with_a_clean_exit(self, hostile, capsys):
         capsys.readouterr()
-        rc = dispatch.main(["eval-gate", "plan", "--repo", str(hostile), "--base", "base"])
+        rc = dispatch.main(["eval-gate", "plan", "--repo", str(hostile), "--opt-in", "--base", "base"])
         captured = capsys.readouterr()
         assert rc == 2
         assert captured.err.startswith("eval-gate plan: ")

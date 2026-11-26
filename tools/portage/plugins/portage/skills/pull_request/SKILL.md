@@ -39,6 +39,12 @@ For example, `/portage:pull_request create 123` parses to `verb=create`, `rest=1
 
 `--unattended` is read only on `create`, as a whole token (see "Unattended `create`").
 
+`--eval-gate` is read on `create`, `update`, `monitor` and `merge`, as a whole token in `rest`. The eval
+gate is off unless the group's `[release].eval_gate` is `true` or the run opts in. On `create`, `update`
+and `monitor`, when the token is present every `updater` and `monitor` dispatch carries the line
+`eval_gate: on` (shown as `[eval_gate: on]` in the dispatches below); without it nothing is added. On
+`merge` the token adds `--opt-in` to the gate's `plan` call.
+
 The verb must be one of `create` / `update` / `monitor` / `merge`. Any other
 first token — or no arguments at all — is an unrecognized verb: report that
 plainly rather than guessing which flow was meant.
@@ -68,7 +74,8 @@ updater's own words:
 - It says the gate **did not run**: the push went ahead and the PR body says why. When the line marks the
   reason as persistent, tell the operator plainly that every push will skip the gate until they fix it, and
   repeat the remedy the line gives.
-- It says the gate passed, or that no eval cases are mapped to what changed: say so in one clause.
+- It says the gate passed, that no eval cases are mapped to what changed, or that the gate is off for this
+  group: say so in one clause, and for off add that `--eval-gate` runs it for one PR.
 
 ## `create` — open PRs
 
@@ -94,6 +101,7 @@ Agent({
     slug: <worktree slug>
     manifest_path: <absolute path to camp manifest JSON>
     group_toml_path: <absolute path to group TOML>
+    [eval_gate: on]
 })
 ```
 
@@ -116,6 +124,7 @@ Agent({
     manifest_path: <absolute path to camp manifest JSON>
     group_toml_path: <absolute path to group TOML>
     pr_pairs: <copy verbatim from updater's pr_pairs line>
+    [eval_gate: on]
 })
 ```
 
@@ -148,8 +157,8 @@ Run these first, in this order. A failure ends the session with
 dispatches nothing**: no block, no hold, no `updater`, no `monitor`. The `<why>` is the fixed phrase
 shown, and the rest is plain words, never a command to paste.
 
-1. **Record argument.** Exactly one token other than `--unattended` and a `--deadline <seconds>`
-   pair. Remove a leading `task/`; the rest must match `^[A-Za-z0-9._/-]+$` with no `..` segment and
+1. **Record argument.** Exactly one token other than `--unattended`, the whole token `--eval-gate` and a
+   `--deadline <seconds>` pair. Remove a leading `task/`; the rest must match `^[A-Za-z0-9._/-]+$` with no `..` segment and
    no leading `-`. The deadline, when given, is a whole number from 1 to 1800. A missing, repeated or
    failing value is never echoed; the line names `task/<unresolved>` and says
    `the record argument is missing or failed validation; pass the name of the closed slice record`.
@@ -241,7 +250,8 @@ place whatever the run ends on.
 For each of those repos, `gh pr list --head <branch> --json number --jq '.[0].number'`. When every
 repo's branch already has a PR (a re-run after an earlier stuck PR step) dispatch `updater` with
 `mode: update`; otherwise with `mode: create`, which opens a PR for a pushed branch that has none.
-Pass the same inputs as `create` Step 1. Read the report's `**Eval gate:**` line first:
+Pass the same inputs as `create` Step 1, with `eval_gate: on` when `rest` carries the token `--eval-gate`.
+Read the report's `**Eval gate:**` line first:
 
 - The push was stopped (a case below its bar, or a dirty tree), the preflight failed, or `pr_pairs`
   is empty: end `stuck` through Step H (`the eval gate stopped the push`, `the preflight failed`,
@@ -271,6 +281,7 @@ Agent({
     manifest_path: <absolute path to camp manifest JSON>
     group_toml_path: <absolute path to group TOML>
     pr_pairs: <copy verbatim from updater's pr_pairs line>
+    [eval_gate: on]
     stop_at_ready: true
     outcome_file: <absolute path of the outcome file>
     Monitor has no file-writing tool: write the one outcome line with a single Bash command,
@@ -363,6 +374,7 @@ Agent({
     slug: <worktree slug>
     manifest_path: <absolute path to camp manifest JSON>
     group_toml_path: <absolute path to group TOML>
+    [eval_gate: on]
 })
 ```
 
@@ -387,6 +399,7 @@ Agent({
     manifest_path: <absolute path to camp manifest JSON>
     group_toml_path: <absolute path to group TOML>
     pr_pairs: <copy verbatim from updater's pr_pairs line>
+    [eval_gate: on]
 })
 ```
 
@@ -417,6 +430,7 @@ Agent({
     manifest_path: <absolute path to camp manifest JSON>
     group_toml_path: <absolute path to group TOML>
     pr_pairs: <repo1_path>:<pr1>:<member1>, <repo2_path>:<pr2>:<member2>, ...
+    [eval_gate: on]
 })
 ```
 
@@ -470,15 +484,18 @@ Every camp group member is a peer — there is no privileged member.
    1. Plan, as one command on its own line:
 
       ```bash
-      portage eval-gate plan --repo <repo_path> --tier merge
+      portage eval-gate plan --repo <repo_path> --tier merge --group-toml <group_toml_path> [--opt-in]
       ```
+
+      `--opt-in` only when `rest` carries `--eval-gate`. With the gate off for this group it prints
+      `status: gate-off`.
 
       It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, one `<plugin_root>:<case>`
       line per selected case, then one `case-flags: <plugin_root>:<case> merge_only=<true|false>
       split_procedure=<true|false>` line per selected case. The merge tier selects every touched case;
       the `case-flags:` lines say which are `merge_only` or `split_procedure`. With
       `status: cases-selected` and at least one `case-flags:` line with `merge_only=true` or
-      `split_procedure=true` the gate applies; keep `<dir>`. With any other `status`, or no such line,
+      `split_procedure=true` the gate applies; keep `<dir>`. With any other `status` (`gate-off` included), or no such line,
       there is no gate for this repo: skip it and give `portage merge` no `--eval-state` for it (`portage merge` makes the same
       decision itself and refuses when one was needed). If `plan` exits non-zero, say so in the
       report and rely on that refusal.

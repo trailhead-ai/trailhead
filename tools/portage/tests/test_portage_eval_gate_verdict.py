@@ -642,6 +642,26 @@ def test_tree_dirty_stops_the_push_with_the_commit_or_stash_message(st, capsys):
     assert (st.dir / "eval-gate-section.md").read_text().startswith(START)
 
 
+def test_gate_off_pushes_and_says_the_gate_is_off_and_how_to_run_it(st, capsys):
+    st.plan([], status="gate-off")
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    assert out.splitlines()[:2] == ["eval-gate: off", "persistent: none"]
+    sec = section_of(out)
+    assert "off for this group" in sec
+    assert "no cases were run" in sec
+    assert "/portage:pull_request create --eval-gate" in sec
+    assert (st.dir / "eval-gate-section.md").read_text().startswith(START)
+
+
+def test_gate_off_ignores_stray_results(st, capsys):
+    st.plan([_entry("a")], status="gate-off")
+    st.result("a", verdict="fail", passed=0, failed=3)
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    assert out.splitlines()[0] == "eval-gate: off"
+
+
 # --- splice --out is written atomically and never through a symlink -------
 
 def test_splice_out_refuses_an_existing_symlink_and_leaves_its_target_alone(tmp_path, capsys):

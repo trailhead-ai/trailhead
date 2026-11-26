@@ -1,9 +1,24 @@
 # The eval gate
 
-Before `updater` pushes, portage runs the eval cases that measure the prose the branch changed. A case
+When it is on, `updater` runs the eval cases that measure the prose the branch changed before it pushes. A case
 that scores below its bar stops the push. A gate that cannot run lets the push through and says so in the
 pull request. The decisions live in code (`portage eval-gate`); `agents/updater.md` only calls it and obeys
 the verdict.
+
+## Turning it on
+
+The gate is off by default. It runs for a group when the camp group TOML sets `[release].eval_gate = true`
+(any other value, an absent key, or a missing or invalid file reads as off), and for a single run when the
+caller opts in: `/portage:pull_request create`, `update`, `monitor` or `merge` with the token `--eval-gate`
+passes `eval_gate: on` to `updater` and `monitor`, which add `--opt-in` to their `plan` calls. Both agents
+also pass `--group-toml <group_toml_path>` on every `plan` call.
+
+When the gate is off, `portage eval-gate plan --repo <path> [--group-toml <toml>] [--opt-in]` writes a plan
+with status `gate-off` and no cases, and `verdict` on it exits 0 with first line `eval-gate: off` and
+`persistent: none`. Its PR section says the gate is off for the group, that no cases were run, and how to run it
+for one PR. The merge-tier gate follows the same rule: `monitor` skips it for a repo whose plan says `gate-off`,
+and `portage merge` applies its backstop (see "Before merge") only when the group setting is true or
+`--eval-state` is given for the repo.
 
 ## Trust model
 
@@ -199,6 +214,7 @@ operator whether to add a mark.
   After a failed case or a broken mapping the state directory is kept, with the per-run grader
   verdicts, and the output lists the ways forward (fix the prose or the case, or re-run; there is no
   override).
+- Exit 0 on a `gate-off` plan: `eval-gate: off`, nothing was run, and the push goes ahead.
 - Exit 0 with a not-run case: the push goes ahead and the section lists each case with its reason.
 - `persistent:` names the reasons nothing about the branch will change (the same machine will skip on every
   push), and `base-unresolved` when the base ref cannot be resolved. `updater` marks them on the `**Eval gate:**` line that leads its report, and `/portage:pull_request`
@@ -229,6 +245,11 @@ a change that touches one, or a split-procedure case, without a current verdict.
    still lets the change through, as on push.
 4. `portage merge --manifest <m> [--toml <t>] --eval-state <repo>=<dir> <repo>:<pr>:<member>` (repeatable,
    one per repo).
+
+When the group's `[release].eval_gate` is not `true` and no `--eval-state` is given for a repo, the check does
+not apply to it, whatever its change touches: the merge is handled as for a change that touches no covered
+case (including the head read and pin below). A given `--eval-state` is checked in full, with the group
+setting either way.
 
 The check applies to a repo only when its change touches a `merge_only` or split-procedure case, decided by the selection
 `plan` uses. A case counts as `merge_only` when the merge-base's mapping or HEAD's committed mapping marks it,

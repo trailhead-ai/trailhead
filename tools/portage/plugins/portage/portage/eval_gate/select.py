@@ -6,7 +6,7 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
 
     {"schema_version": 1,
      "status": "cases-selected" | "no-cases-mapped" | "base-unresolved" | "base-invalid"
-               | "mapping-invalid" | "tree-dirty",
+               | "mapping-invalid" | "tree-dirty" | "gate-off",
      "repo": "<absolute repo path>",
      "base": "<ref as given or resolved>" | null,
      "merge_base": "<sha>" | null,
@@ -700,10 +700,12 @@ def local_head(repo: Path) -> str:
     return _git(Path(repo).resolve(), "rev-parse", "--verify", "--end-of-options", "HEAD").strip()
 
 
-def plan(repo: Path, base: str | None, tier: str = "push", *, git: Git = GIT) -> tuple[Path, dict]:
+def plan(repo: Path, base: str | None, tier: str = "push", *, git: Git = GIT,
+         gate_on: bool = True) -> tuple[Path, dict]:
     """Compute the plan for ``repo`` against ``base`` and write it to a new state dir.
 
-    ``tier`` is ``push`` (leaves out ``merge_only`` cases) or ``merge`` (every touched case).
+    ``tier`` is ``push`` (leaves out ``merge_only`` cases) or ``merge`` (every touched case). With
+    ``gate_on`` false nothing is selected and the status is ``gate-off``.
 
     A ``base`` that starts with ``-`` is ``base-invalid``. Raises ``GitError`` when ``repo`` is not a git
     work tree."""
@@ -718,8 +720,10 @@ def plan(repo: Path, base: str | None, tier: str = "push", *, git: Git = GIT) ->
         "new_runner_grants": False, "total_max_cost_usd": 0, "cases": [],
         "needs_merge_model": [], "mark_changes": [],
     }
-    resolved = _resolve_base(repo, base, git)
-    if _option_like(base):
+    resolved = _resolve_base(repo, base, git) if gate_on else None
+    if not gate_on:
+        result["status"] = "gate-off"
+    elif _option_like(base):
         result["status"] = "base-invalid"
     elif git.run(repo, "status", "--porcelain", "--untracked-files=no").strip():
         result["status"] = "tree-dirty"

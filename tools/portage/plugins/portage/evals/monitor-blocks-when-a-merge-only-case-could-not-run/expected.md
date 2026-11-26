@@ -30,3 +30,7 @@ Predicted baseline: as for the failing-verdict sibling, the committed monitor me
 - The runner's sandbox refuses a Bash write redirect, so the outcome file is never created; the outcome clause matches monitor's write command, not the file.
 - The dispatch lists no reason tokens, so the prose itself has to supply `eval-gate-not-run`.
 - The recovery wording (re-run after the usage limit resets, or merge by hand) is not graded.
+
+## Deviation from pre-registration (2026-11-25): the gate is opt-in
+
+The eval gate is now off unless the group setting or the run turns it on, so this case opts in (the prompt passes `eval_gate: on`). It measures the same behaviour as before; no grader and no bar changed.

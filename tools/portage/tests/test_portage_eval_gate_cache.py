@@ -441,7 +441,7 @@ class TestCrossModelReuse:
         entries = {}
         for tier in ("push", "merge"):
             capsys.readouterr()
-            dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--base", "base", "--tier", tier])
+            dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--opt-in", "--base", "base", "--tier", tier])
             out = capsys.readouterr().out
             state = next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):]
             entries[tier] = _json.loads((Path(state) / "plan.json").read_text())["cases"][0]

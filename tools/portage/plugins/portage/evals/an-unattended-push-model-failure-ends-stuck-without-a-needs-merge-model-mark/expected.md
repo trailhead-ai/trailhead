@@ -28,3 +28,7 @@ Predicted baseline: the updater's stop leads the step to `stuck` through its Ste
 - One fixture, one case name, one fake-runner behaviour, no merge-model pass history.
 - The gate is real; the runner is a fake binary.
 - The `no-commit-after-the-scaffold` grader pins a ref sha produced by the shared `evals/pr-step-scaffold.sh`, so an edit to that shared scaffold turns it red until the sha is updated.
+
+## Deviation from pre-registration (2026-11-25): the gate is opt-in
+
+The eval gate is now off unless the group setting or the run turns it on, so this case opts in (the prompt adds `--eval-gate` to the unattended `create`). It measures the same behaviour as before; no grader and no bar changed.
