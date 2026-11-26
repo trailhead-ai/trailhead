@@ -89,9 +89,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Make the runner's Python writable only by its owner
-        # The gateway and eval shims refuse to pin an interpreter anyone but its owner could
-        # replace, and the hosted tool cache ships Python group-writable.
-        run: sudo chmod -R go-w "$(python -c 'import sys; print(sys.base_prefix)')"
+        # The gateway and eval shims refuse to pin an interpreter that anyone but its owner could
+        # replace, checking the interpreter and every folder above it. The hosted tool cache ships
+        # Python, and the folders holding it, group-writable.
+        run: |
+          prefix="$(python -c 'import sys, os; print(os.path.realpath(sys.base_prefix))')"
+          sudo chmod -R go-w "$prefix"
+          dir="$prefix"
+          while [ "$dir" != / ]; do dir="$(dirname "$dir")"; sudo chmod go-w "$dir"; done
 
       - name: Install tmux
         # tmux is not on the ubuntu-latest runner image. camp's real-tmux
@@ -198,9 +203,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Make the runner's Python writable only by its owner
-        # The gateway and eval shims refuse to pin an interpreter anyone but its owner could
-        # replace, and the hosted tool cache ships Python group-writable.
-        run: sudo chmod -R go-w "$(python -c 'import sys; print(sys.base_prefix)')"
+        # The gateway and eval shims refuse to pin an interpreter that anyone but its owner could
+        # replace, checking the interpreter and every folder above it. The hosted tool cache ships
+        # Python, and the folders holding it, group-writable.
+        run: |
+          prefix="$(python -c 'import sys, os; print(os.path.realpath(sys.base_prefix))')"
+          sudo chmod -R go-w "$prefix"
+          dir="$prefix"
+          while [ "$dir" != / ]; do dir="$(dirname "$dir")"; sudo chmod go-w "$dir"; done
 
       - name: Install pytest
         run: python -m pip install --upgrade pip "pytest==9.0.3" "pytest-xdist==3.8.0"
