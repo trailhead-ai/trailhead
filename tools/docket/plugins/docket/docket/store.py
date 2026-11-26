@@ -131,6 +131,11 @@ class Entry:
         validate_kind(self.kind)
         validate_slug(self.slug)
 
+    @property
+    def key(self) -> tuple[str, str]:
+        """(kind, slug): what identifies the entry within its vault's list."""
+        return (self.kind, self.slug)
+
 
 @dataclass(frozen=True)
 class DocketList:
@@ -217,7 +222,7 @@ def _parse_list(doc: dict[str, Any]) -> DocketList:
     if not isinstance(entries_raw, list):
         raise ValueError("entries must be an array")
     entries = tuple(_parse_entry(e) for e in entries_raw)
-    keys = [(e.kind, e.slug) for e in entries]
+    keys = [e.key for e in entries]
     if len(set(keys)) != len(keys):
         raise ValueError("duplicate entries")
     return DocketList(entries)
@@ -234,14 +239,16 @@ def _parse_order(doc: dict[str, Any]) -> tuple[str, ...]:
     return names
 
 
+def entry_doc(entry: Entry) -> dict[str, Any]:
+    """An entry as it is stored: {"kind", "slug"} plus {"workspace": {"group", "slug"}} when it has one."""
+    doc: dict[str, Any] = {"kind": entry.kind, "slug": entry.slug}
+    if entry.workspace is not None:
+        doc["workspace"] = {"group": entry.workspace.group, "slug": entry.workspace.slug}
+    return doc
+
+
 def _serialize_list(lst: DocketList) -> dict[str, Any]:
-    entries = []
-    for e in lst.entries:
-        item: dict[str, Any] = {"kind": e.kind, "slug": e.slug}
-        if e.workspace is not None:
-            item["workspace"] = {"group": e.workspace.group, "slug": e.workspace.slug}
-        entries.append(item)
-    return {"version": FORMAT_VERSION, "entries": entries}
+    return {"version": FORMAT_VERSION, "entries": [entry_doc(e) for e in lst.entries]}
 
 
 class Store:

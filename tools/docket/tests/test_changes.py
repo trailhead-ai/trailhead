@@ -11,17 +11,12 @@ import subprocess
 
 import pytest
 
-from _docket_cli import PLUGIN_ROOT  # noqa: F401  (puts the plugin on sys.path)
+from _docket_cli import completed, install, run_cli, vault_ls
 from trailhead.tests._git_support import hermetic_git_env  # noqa: F401  (fixture)
 
-from docket import changes, cli
+from docket import changes
 
 DEFAULT = "proj"
-VAULTS = {"proj": "default", "other": "product", "team": "repo"}
-
-
-def _completed(argv, rc=0, out="", err=""):
-    return subprocess.CompletedProcess(list(argv), rc, out, err)
 
 
 class FakeLore:
@@ -64,20 +59,18 @@ class FakeLore:
         argv = list(argv)
         self.calls.append(argv)
         if argv[:4] == ["lore", "vault", "ls", "--json"]:
-            rows = [{"name": n, "scope": s, "path": str(self.vault_dir if s == "default" else self.vault_dir / n)}
-                    for n, s in VAULTS.items()]
-            return _completed(argv, out=json.dumps(rows))
+            return vault_ls(argv, self.vault_dir)
         if argv[:3] == ["lore", "record", "show"]:
             assert argv[3:5] == ["--json", "--vault"], argv
             vault, record = argv[5], argv[6]
             ref = f"{vault}/{record}"
             if ref in self.failing:
                 body = {"record_id": record, "sidecar": {"title": "T", "status": "active", "keywords": ["note"]}}
-                return _completed(argv, 1, json.dumps(body), "lore: lookup failed\n")
+                return completed(argv, 1, json.dumps(body), "lore: lookup failed\n")
             if ref not in self.records:
-                return _completed(argv, 1, "", f"lore: no such record {record}\n")
+                return completed(argv, 1, "", f"lore: no such record {record}\n")
             body = {"record_id": record, "sidecar": {"title": "T", "status": "active", "keywords": self.records[ref]}}
-            return _completed(argv, 0, json.dumps(body), "revision: abc123\n")
+            return completed(argv, 0, json.dumps(body), "revision: abc123\n")
         if argv[:2] == ["lore", "sync"]:
             assert argv[2:] == ["--vault", self.vault, "--json"], argv
             n = self.syncs
@@ -87,19 +80,19 @@ class FakeLore:
                 hook(self)
             if self.sync_plan.get(n) == "holding":
                 doc = {"vaults": [{"vault": self.vault, "outcome": "holding"}]}
-                return _completed(argv, 1, "  main: Committed: x\n" + json.dumps(doc, indent=2) + "\n",
+                return completed(argv, 1, "  main: Committed: x\n" + json.dumps(doc, indent=2) + "\n",
                                   "lore: the push did not go through; needs a person\n")
             doc = {"vaults": [{"vault": self.vault, "outcome": "published"}]}
-            return _completed(argv, 0, f"  {self.vault}: Committed: x\n  {self.vault}: Pushed to origin.\n"
+            return completed(argv, 0, f"  {self.vault}: Committed: x\n  {self.vault}: Pushed to origin.\n"
                               + json.dumps(doc, indent=2) + "\n")
         if argv[:3] == ["git", "-C", str(self.vault_dir)] and "rev-list" in argv:
             assert argv[3:] == ["rev-list", "--count", "@{u}..HEAD"], argv
             if not self.has_upstream:
-                return _completed(argv, 128, "", "fatal: no upstream configured\n")
-            return _completed(argv, 0, self.ahead + "\n")
+                return completed(argv, 128, "", "fatal: no upstream configured\n")
+            return completed(argv, 0, self.ahead + "\n")
         if argv[:3] == ["git", "-C", str(self.vault_dir)] and "status" in argv:
             assert argv[3:] == ["status", "--porcelain", "--", "sites/docket"], argv
-            return _completed(argv, 0, self.dirty)
+            return completed(argv, 0, self.dirty)
         raise AssertionError(f"unexpected call {argv}")
 
 
@@ -107,17 +100,14 @@ class Env:
     def __init__(self, vault_dir, fake, monkeypatch, capsys):
         self.vault_dir = vault_dir
         self.fake = fake
-        self._monkeypatch = monkeypatch
         self._capsys = capsys
-        for name, command in changes.make_commands(fake, lock_deadline=0.2).items():
-            monkeypatch.setitem(cli.COMMANDS, name, command)
+        self.install(monkeypatch)
+
+    def install(self, monkeypatch, **store_kwargs):
+        install(monkeypatch, changes.make_commands(self.fake, lock_deadline=0.2, **store_kwargs))
 
     def run(self, *argv):
-        self._capsys.readouterr()
-        code = cli.main(list(argv))
-        captured = self._capsys.readouterr()
-        doc = json.loads(captured.out) if captured.out.strip() else None
-        return code, doc, captured.err
+        return run_cli(self._capsys, argv)
 
     def list_path(self, vault=DEFAULT):
         return self.vault_dir / "sites" / "docket" / "lists" / f"{vault}.json"

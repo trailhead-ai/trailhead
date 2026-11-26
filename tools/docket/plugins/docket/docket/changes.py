@@ -65,9 +65,11 @@ from docket import sync as pipeline
 from docket.errors import DocketError
 from docket.store import (
     DocketList, Entry, ListTooLargeError, Runner, Store, StoreError, UnreadableListError, UnsafeNameError,
-    Workspace, default_runner, validate_vault_name,
+    Workspace, default_runner, entry_doc,
 )
-from docket.validate import Ref, Refused, check_kind, configured_vaults, parse_ref, parse_workspace, require_configured
+from docket.validate import (
+    Ref, Refused, check_kind, configured_vaults, parse_ref, parse_vault, parse_workspace, require_configured,
+)
 
 PARTIAL = "partial"
 EXIT_CODES = {**pipeline.EXIT_CODES, PARTIAL: 1}
@@ -81,7 +83,7 @@ def _entry(ref: Ref) -> Entry:
 
 
 def _keys(lst: DocketList) -> list[pipeline.Key]:
-    return [(e.kind, e.slug) for e in lst.entries]
+    return [e.key for e in lst.entries]
 
 
 def _status(ref: Ref, status: str, **extra: Any) -> dict:
@@ -107,8 +109,8 @@ def _add(lists: Lists, p: argparse.Namespace) -> Result:
     expect = []
     for vault, new in fresh.items():
         current = list(lists[vault].entries)
-        old_keys = [(e.kind, e.slug) for e in current]
-        new_keys = [(e.kind, e.slug) for e in new]
+        old_keys = _keys(lists[vault])
+        new_keys = [e.key for e in new]
         if anchor is not None:
             at = old_keys.index(anchor.key) + (1 if p.where == "after" else 0)
             ahead, behind = (new_keys, [anchor.key]) if p.where == "before" else ([anchor.key], new_keys)
@@ -127,7 +129,7 @@ def _remove(lists: Lists, p: argparse.Namespace) -> Result:
     entries = []
     for ref in p.refs:
         if ref.key in _keys(out[ref.vault]):
-            out[ref.vault] = DocketList(tuple(e for e in out[ref.vault].entries if (e.kind, e.slug) != ref.key))
+            out[ref.vault] = DocketList(tuple(e for e in out[ref.vault].entries if e.key != ref.key))
             gone.setdefault(ref.vault, []).append(ref.key)
             entries.append(_status(ref, "removed"))
         else:
@@ -144,12 +146,12 @@ def _top(lists: Lists, p: argparse.Namespace) -> Result:
     expect = []
     for vault, keys in wanted.items():
         current = lists[vault].entries
-        moved = [e for e in current if (e.kind, e.slug) in keys]
-        rest = [e for e in current if (e.kind, e.slug) not in keys]
+        moved = [e for e in current if e.key in keys]
+        rest = [e for e in current if e.key not in keys]
         out[vault] = DocketList(tuple(moved + rest))
-        moved_keys = [(e.kind, e.slug) for e in moved]
+        moved_keys = [e.key for e in moved]
         expect.append(pipeline.Expectation(vault, present=moved_keys, order=moved_keys,
-                                           precede=[(moved_keys, [(e.kind, e.slug) for e in rest])]))
+                                           precede=[(moved_keys, [e.key for e in rest])]))
     entries = []
     for ref in p.refs:
         if ref.vault not in wanted or ref.key not in wanted[ref.vault]:
@@ -163,7 +165,7 @@ def _set_workspace(lists: Lists, ref: Ref, workspace: Workspace | None) -> tuple
     lst = lists[ref.vault]
     if ref.key not in _keys(lst):
         raise Refused(f"{ref.text} is not in the docket", [_status(ref, "refused")])
-    entries = tuple(dataclasses.replace(e, workspace=workspace) if (e.kind, e.slug) == ref.key else e
+    entries = tuple(dataclasses.replace(e, workspace=workspace) if e.key == ref.key else e
                     for e in lst.entries)
     return {**lists, ref.vault: DocketList(entries)}, entries != lst.entries
 
@@ -223,7 +225,7 @@ def _set_order(lists: Lists, p: argparse.Namespace) -> Result:
     entries = []
     expect = []
     for g in p.groups:
-        by_key = {(e.kind, e.slug): e for e in lists[g.vault].entries}
+        by_key = {e.key: e for e in lists[g.vault].entries}
         out[g.vault] = DocketList(tuple(by_key[k] for k in g.now))
         for i, (kind, slug) in enumerate(g.now):
             entries.append({"ref": f"{g.vault}/{kind}/{slug}", "status": "in-place" if g.was[i] == (kind, slug) else "moved"})
@@ -250,8 +252,7 @@ def _parse_set_order(args: argparse.Namespace) -> argparse.Namespace:
         return taken
 
     while i < len(words):
-        vault = words[i]
-        _no_dash_vault(vault)
+        vault = parse_vault(words[i])
         if i + 1 >= len(words) or words[i + 1] != "was":
             raise Refused(f"expected 'was' after vault {vault!r}")
         i += 2
@@ -268,15 +269,6 @@ def _parse_set_order(args: argparse.Namespace) -> argparse.Namespace:
             raise Refused(f"vault {vault!r} is named more than once")
         groups.append(OrderGroup(vault, was, now))
     return argparse.Namespace(groups=groups, refs=refs)
-
-
-def _no_dash_vault(vault: str) -> None:
-    if vault.startswith("-") or "/" in vault or not vault:
-        raise Refused(f"{vault!r} is not a vault name; expected <vault> was <REF...> now <REF...>")
-    try:
-        validate_vault_name(vault)
-    except UnsafeNameError as exc:
-        raise Refused(str(exc)) from exc
 
 
 def _refs(values: Sequence[str]) -> list[Ref]:
@@ -314,13 +306,6 @@ def _live_count(lists: Lists, touched: Sequence[str]) -> dict[str, int]:
     return {v: len(lists[v].entries) for v in touched}
 
 
-def _entry_doc(entry: Entry) -> dict:
-    doc: dict[str, Any] = {"kind": entry.kind, "slug": entry.slug}
-    if entry.workspace is not None:
-        doc["workspace"] = {"group": entry.workspace.group, "slug": entry.workspace.slug}
-    return doc
-
-
 _MESSAGES = {
     pipeline.SAVED: "Saved and synced.",
     pipeline.UNCHANGED: "Nothing changed.",
@@ -337,7 +322,7 @@ def _execute(name: str, args: argparse.Namespace, runner: Runner, store_kwargs: 
         parsed = parse(args)
         touched = list(dict.fromkeys(r.vault for r in _refs_of(parsed)))
         vaults = configured_vaults(runner)
-        require_configured(vaults, _refs_of(parsed))
+        require_configured(vaults, touched)
         if name == "add":
             for ref in parsed.refs:
                 check_kind(runner, ref)
@@ -360,22 +345,32 @@ def _execute(name: str, args: argparse.Namespace, runner: Runner, store_kwargs: 
             return pipeline.Applied(changed, entries, {v: after[v] for v in touched}, expect)
 
         report = pipeline.run_pipeline(runner, store, vaults.default_name, apply)
-        doc.update(outcome=report.outcome, message=_MESSAGES[report.outcome], entries=report.applied.entries,
-                   live_count=_live_count(report.lists, touched))
-        if report.sync_warning:
-            doc["sync_warning"] = report.sync_warning
+        doc.update(_result(report, report.outcome, _live_count(report.lists, touched)))
         if report.outcome == pipeline.LOST_TO_REMOTE:
-            doc["lists"] = {v: [_entry_doc(e) for e in lst.entries] for v, lst in report.lists.items()}
+            doc["lists"] = {v: [entry_doc(e) for e in lst.entries] for v, lst in report.lists.items()}
     except Refused as exc:
-        doc.update(outcome=pipeline.REFUSED, message=str(exc), entries=exc.entries, live_count={})
+        doc.update(_refused(exc))
         if isinstance(exc, StaleOrder):
             doc["stale"] = exc.vaults
     except PartialWrite as exc:
         doc.update(outcome=PARTIAL, message=str(exc), entries=[], live_count={}, written=exc.written,
                    not_written=exc.not_written)
     except (UnreadableListError, ListTooLargeError, UnsafeNameError) as exc:
-        doc.update(outcome=pipeline.REFUSED, message=str(exc), entries=[], live_count={})
+        doc.update(_refused(exc))
     return _emit(doc)
+
+
+def _result(report: pipeline.Report, outcome: str, live_count: dict[str, int], **extra: Any) -> dict[str, Any]:
+    doc: dict[str, Any] = dict(outcome=outcome, message=_MESSAGES[outcome], entries=report.applied.entries,
+                               live_count=live_count, **extra)
+    if report.sync_warning:
+        doc["sync_warning"] = report.sync_warning
+    return doc
+
+
+def _refused(exc: Exception) -> dict[str, Any]:
+    entries = exc.entries if isinstance(exc, Refused) else []
+    return dict(outcome=pipeline.REFUSED, message=str(exc), entries=entries, live_count={})
 
 
 def _emit(doc: dict[str, Any]) -> int:
@@ -386,13 +381,11 @@ def _emit(doc: dict[str, Any]) -> int:
 def _execute_vault_order(args: argparse.Namespace, runner: Runner, store_kwargs: dict[str, Any]) -> int:
     doc: dict[str, Any] = {"command": "vault-order"}
     try:
-        names = [_vault_arg(v) for v in args.vaults]
+        names = [parse_vault(v) for v in args.vaults]
         if len(set(names)) != len(names):
             raise Refused("a vault is named more than once")
         vaults = configured_vaults(runner)
-        unknown = [n for n in names if n not in vaults.names]
-        if unknown:
-            raise Refused(f"vault {unknown[0]!r} is not one of the configured vaults ({', '.join(vaults.names)})")
+        require_configured(vaults, names)
         store = Store(vaults.default_path, **store_kwargs)
 
         def apply(s: Store) -> pipeline.Applied:
@@ -406,20 +399,10 @@ def _execute_vault_order(args: argparse.Namespace, runner: Runner, store_kwargs:
         outcome = report.outcome
         if outcome in (pipeline.SAVED, pipeline.SAVED_NOT_SYNCED) and stands != names:
             outcome = pipeline.LOST_TO_REMOTE
-        doc.update(outcome=outcome, message=_MESSAGES[outcome], entries=report.applied.entries, live_count={},
-                   order=effective)
-        if report.sync_warning:
-            doc["sync_warning"] = report.sync_warning
-    except Refused as exc:
-        doc.update(outcome=pipeline.REFUSED, message=str(exc), entries=exc.entries, live_count={})
-    except (UnreadableListError, UnsafeNameError) as exc:
-        doc.update(outcome=pipeline.REFUSED, message=str(exc), entries=[], live_count={})
+        doc.update(_result(report, outcome, {}, order=effective))
+    except (Refused, UnreadableListError, UnsafeNameError) as exc:
+        doc.update(_refused(exc))
     return _emit(doc)
-
-
-def _vault_arg(value: str) -> str:
-    _no_dash_vault(value)
-    return value
 
 
 def _values(parser: argparse.ArgumentParser, dest: str = "refs", metavar: str = "REF") -> None:

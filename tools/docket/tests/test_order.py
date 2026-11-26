@@ -13,7 +13,6 @@ import pytest
 from _docket_cli import PLUGIN_ROOT  # noqa: F401  (puts the plugin on sys.path)
 from test_changes import DEFAULT, env, hermetic_git_env, ref  # noqa: F401  (fixtures and helpers)
 
-from docket import changes, cli
 from docket.store import Store, resolve_order
 
 OTHER = "other"
@@ -164,14 +163,10 @@ def _fail_nth_replace(n):
 
 
 class TestInterruptedWrite:
-    def _install(self, env, monkeypatch, replace):
-        for name, command in changes.make_commands(env.fake, lock_deadline=0.2, replace=replace).items():
-            monkeypatch.setitem(cli.COMMANDS, name, command)
-
     def test_a_failure_between_the_two_writes_names_the_vault_that_was_written(self, env, monkeypatch):
         two_vaults(env)
         old = {v: env.raw(v) for v in (DEFAULT, OTHER)}
-        self._install(env, monkeypatch, _fail_nth_replace(2))
+        env.install(monkeypatch, replace=_fail_nth_replace(2))
         code, doc, _ = env.run(*order_argv((DEFAULT, [A, B, C], [C, B, A]), (OTHER, [X, Y], [Y, X])))
         assert code == 1
         assert doc["outcome"] == "partial"
@@ -185,7 +180,7 @@ class TestInterruptedWrite:
     def test_a_failure_on_the_first_write_leaves_both_files_old_and_is_a_plain_error(self, env, monkeypatch):
         two_vaults(env)
         old = {v: env.raw(v) for v in (DEFAULT, OTHER)}
-        self._install(env, monkeypatch, _fail_nth_replace(1))
+        env.install(monkeypatch, replace=_fail_nth_replace(1))
         code, doc, err = env.run(*order_argv((DEFAULT, [A, B, C], [C, B, A]), (OTHER, [X, Y], [Y, X])))
         assert code == 1
         assert doc is None
@@ -196,7 +191,7 @@ class TestInterruptedWrite:
     def test_each_file_is_wholly_old_or_wholly_new_never_partial(self, env, monkeypatch, failing):
         two_vaults(env)
         old = {v: env.raw(v) for v in (DEFAULT, OTHER)}
-        self._install(env, monkeypatch, _fail_nth_replace(failing))
+        env.install(monkeypatch, replace=_fail_nth_replace(failing))
         env.run(*order_argv((DEFAULT, [A, B, C], [C, B, A]), (OTHER, [X, Y], [Y, X])))
         new = {DEFAULT: [C, B, A], OTHER: [Y, X]}
         for vault in (DEFAULT, OTHER):

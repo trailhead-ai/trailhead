@@ -7,7 +7,8 @@ change commands report as the outcome `refused` with exit 2 and nothing written.
 
 A REF is `<vault>/<kind>/<slug>`: exactly three non-empty parts, no value begins with a dash, and
 kind and slug use the store's own validators (lowercase letters, digits, `.`, `_`, `-`). A workspace
-is `GROUP/SLUG` under the same rule. The store validates again on every path it opens.
+is `GROUP/SLUG` under the same rule. A vault named on its own (set-order, vault-order) is one part with
+no `/`, under the store's vault-name rule. The store validates again on every path it opens.
 """
 from __future__ import annotations
 
@@ -64,6 +65,15 @@ def parse_ref(value: str) -> Ref:
         raise Refused(str(exc)) from exc
 
 
+def parse_vault(value: str) -> str:
+    if value.startswith("-") or "/" in value or not value:
+        raise Refused(f"{value!r} is not a vault name; expected <vault> was <REF...> now <REF...>")
+    try:
+        return validate_vault_name(value)
+    except UnsafeNameError as exc:
+        raise Refused(str(exc)) from exc
+
+
 def parse_workspace(value: str) -> Workspace:
     _no_dash(value)
     parts = value.split("/")
@@ -89,17 +99,22 @@ def configured_vaults(runner: Runner) -> Vaults:
     return Vaults(tuple(r["name"] for r in rows), default, path)
 
 
-def require_configured(vaults: Vaults, refs: Sequence[Ref]) -> None:
-    for ref in refs:
-        if ref.vault not in vaults.names:
-            raise Refused(f"vault {ref.vault!r} is not one of the configured vaults ({', '.join(vaults.names)})")
+def require_configured(vaults: Vaults, names: Sequence[str]) -> None:
+    for name in names:
+        if name not in vaults.names:
+            raise Refused(f"vault {name!r} is not one of the configured vaults ({', '.join(vaults.names)})")
+
+
+def show_record(runner: Runner, vault: str, kind: str, slug: str) -> "subprocess.CompletedProcess[str]":
+    """`lore record show --json` for one record; the caller reads the exit code and the `sidecar` it prints."""
+    return runner(["lore", "record", "show", "--json", "--vault", vault, f"{kind}/{slug}"])
 
 
 def check_kind(runner: Runner, ref: Ref) -> None:
     """Refuse a record that does not resolve, or is not a spec, a task or a blob keyworded `note`."""
     refusal = None
     try:
-        proc = runner(["lore", "record", "show", "--json", "--vault", ref.vault, f"{ref.kind}/{ref.slug}"])
+        proc = show_record(runner, *ref)
     except (OSError, subprocess.SubprocessError) as exc:
         raise StoreError(f"cannot look up {ref.text}: {exc}") from exc
     if proc.returncode != 0:

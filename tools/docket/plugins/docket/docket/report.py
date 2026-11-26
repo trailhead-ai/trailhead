@@ -39,7 +39,7 @@ from docket import camp
 from docket.clean import clean
 from docket.errors import DocketError
 from docket.store import Entry, Runner, Store, StoreError, UnreadableListError
-from docket.validate import configured_vaults
+from docket.validate import configured_vaults, show_record
 
 OVER_LIMIT = 25
 FINISHED_STATUSES = frozenset({"done", "dropped", "superseded", "complete"})
@@ -71,7 +71,7 @@ def _text(value: Any) -> str | None:
 
 def _lookup(runner: Runner, vault: str, entry: Entry) -> _Lookup:
     try:
-        proc = runner(["lore", "record", "show", "--json", "--vault", vault, f"{entry.kind}/{entry.slug}"])
+        proc = show_record(runner, vault, entry.kind, entry.slug)
     except (OSError, subprocess.SubprocessError):
         return _Lookup(unknown=True)
     if proc.returncode == 1 and _NOT_FOUND in (proc.stderr or ""):

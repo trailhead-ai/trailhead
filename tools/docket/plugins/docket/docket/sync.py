@@ -96,7 +96,7 @@ class Expectation:
     workspaces: dict[Key, Workspace | None] = field(default_factory=dict)
 
     def holds(self, lst: DocketList) -> bool:
-        index = {(e.kind, e.slug): i for i, e in enumerate(lst.entries)}
+        index = {e.key: i for i, e in enumerate(lst.entries)}
         if any(k not in index for k in self.present) or any(k in index for k in self.absent):
             return False
         placed = [index[k] for k in self.order if k in index]

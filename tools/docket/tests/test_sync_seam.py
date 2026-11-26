@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from _docket_cli import PLUGIN_ROOT
+from _docket_cli import PLUGIN_ROOT, install, run_cli
 from trailhead.tests._git_support import make_hermetic_git_env
 
-from docket import changes, cli
+from docket import changes
 
 pytestmark = pytest.mark.seam_real
 
@@ -65,11 +65,9 @@ class Host:
         return "main/blob/" + title.lower().replace(" ", "-")
 
     def docket(self, monkeypatch, capsys, *argv, runner=None):
-        for name, command in changes.make_commands(runner or self.runner).items():
-            monkeypatch.setitem(cli.COMMANDS, name, command)
-        capsys.readouterr()
-        code = cli.main(list(argv))
-        return code, json.loads(capsys.readouterr().out)
+        install(monkeypatch, changes.make_commands(runner or self.runner))
+        code, doc, _ = run_cli(capsys, argv)
+        return code, doc
 
     def list_on_disk(self):
         path = self.vault / "sites" / "docket" / "lists" / "main.json"
