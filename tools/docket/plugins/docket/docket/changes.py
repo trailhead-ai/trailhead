@@ -389,7 +389,10 @@ def _execute_vault_order(args: argparse.Namespace, runner: Runner, store_kwargs:
         store = Store(vaults.default_path, **store_kwargs)
 
         def apply(s: Store) -> pipeline.Applied:
-            change = s.update_order(lambda _current: names)
+            try:
+                change = s.update_order(lambda _current: names)
+            except OSError as exc:
+                raise StoreError(f"cannot write the vault order: {exc.strerror or exc}") from exc
             return pipeline.Applied(change.changed, [{"ref": n, "status": "stored"} for n in names], {})
 
         report = pipeline.run_pipeline(runner, store, vaults.default_name, apply)
@@ -400,9 +403,8 @@ def _execute_vault_order(args: argparse.Namespace, runner: Runner, store_kwargs:
                 stands = list(store.read_order())
                 extra["order"] = store.effective_order()
         except (OSError, StoreError) as exc:
-            if outcome not in (pipeline.SAVED, pipeline.SAVED_NOT_SYNCED):
-                raise
-            outcome = pipeline.SAVED_NOT_SYNCED
+            if outcome in (pipeline.SAVED, pipeline.SAVED_NOT_SYNCED):
+                outcome = pipeline.SAVED_NOT_SYNCED
             note = f"could not re-read the stored order after the sync: {exc}"
             report.sync_warning = f"{report.sync_warning}; {note}" if report.sync_warning else note
         else:

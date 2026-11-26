@@ -6,6 +6,7 @@ lock real files under tmp_path.
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 
@@ -14,7 +15,7 @@ import pytest
 from _docket_cli import PLUGIN_ROOT  # noqa: F401  (puts the plugin on sys.path)
 from test_changes import DEFAULT, env, hermetic_git_env, ref  # noqa: F401  (fixtures and helpers)
 
-from docket.store import Store, resolve_order
+from docket.store import LockTimeoutError, Store, resolve_order
 
 OTHER = "other"
 A, B, C = "task/a", "task/b", "task/c"
@@ -268,6 +269,37 @@ class TestVaultOrder:
         assert (code, doc["outcome"]) == (3, "saved-not-synced")
         assert "docket lock" in doc["sync_warning"]
         assert stored_order(env) == [OTHER]
+
+    def test_a_write_that_fails_is_a_docket_line_not_a_traceback(self, env, monkeypatch):
+        def failing_replace(*_args, **_kwargs):
+            raise OSError(errno.EIO, "Input/output error")
+
+        env.install(monkeypatch, replace=failing_replace)
+        code, doc, err = env.run("vault-order", "--", OTHER)
+        assert (code, doc) == (1, None)
+        assert err.startswith("docket: cannot write")
+        assert "Input/output error" in err
+        assert stored_order(env) is None
+
+    def test_an_unchanged_order_whose_reread_fails_stays_unchanged_with_a_warning(self, env, monkeypatch):
+        env.run("vault-order", "--", OTHER, DEFAULT)
+        real_locked = Store.locked
+        entered = []
+
+        @contextlib.contextmanager
+        def locked(self):
+            entered.append(1)
+            if len(entered) == 3:
+                raise LockTimeoutError("timed out waiting for the docket lock")
+            with real_locked(self):
+                yield
+
+        monkeypatch.setattr(Store, "locked", locked)
+        code, doc, err = env.run("vault-order", "--", OTHER, DEFAULT)
+        assert (code, err) == (0, "")
+        assert doc["outcome"] == "unchanged"
+        assert "docket lock" in doc["sync_warning"]
+        assert "order" not in doc
 
     def test_an_order_the_remote_kept_is_saved(self, env):
         env.fake.sync_hooks = {1: lambda fake: None}
