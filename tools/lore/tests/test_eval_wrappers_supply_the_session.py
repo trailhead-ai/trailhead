@@ -62,6 +62,12 @@ def test_every_wrapper_the_scaffold_writes_logs_to_the_case_session(tmp_path, sc
     assert built.returncode == 0, built.stderr
     wrappers = [w for w in (cwd / "lore", cwd / "bin" / "lore") if w.is_file()]
     if not wrappers:
+        case = scaffold.parents[1]
+        texts = [case / "prompt.md", *sorted((case / "graders").rglob("*"))]
+        names_lore = [
+            t.name for t in texts if t.is_file() and "lore " in t.read_text(encoding="utf-8")
+        ]
+        assert not names_lore, f"case uses lore but its scaffold writes no wrapper: {names_lore}"
         return
 
     for n, wrapper in enumerate(wrappers):
