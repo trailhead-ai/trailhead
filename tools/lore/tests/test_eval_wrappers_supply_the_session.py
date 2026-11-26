@@ -6,8 +6,9 @@ grader can know, while the graders read the case's fixed session. So each case's
 wrappers that supply the case's session themselves, and the model runs the procedure's commands
 exactly as the procedure gives them, with no session flag of its own.
 
-Each test runs a case's real scaffold (one that writes no wrapper is skipped) in a fenced HOME, logs a candidate through each wrapper it
-wrote with the runner's session in the environment and no flag, and reads where it landed.
+Each test runs a case's real scaffold (one that writes no wrapper is skipped) in a fenced HOME, logs a
+candidate through each wrapper it wrote with the runner's session in the environment and no flag, and
+reads where it landed.
 """
 
 from __future__ import annotations
