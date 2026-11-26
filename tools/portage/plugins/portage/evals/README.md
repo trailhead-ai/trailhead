@@ -12,3 +12,7 @@ The corpus's runner cases (`a-failing-eval-gate-stops-the-push`,
 in this directory's `eval-gate.json`. The monitor, updater and pull_request cases that are not the
 detectors for their file are `"merge_only": true` and run before merge; the merge-tier cases above stay core,
 and every measured file keeps at least one core case.
+Of the `unattended-pr-step-*` cases for a resumed run, `unattended-pr-step-ends-needs-a-decision-on-a-parked-correction`
+is core, because only the PR step ends on a parked correction; the others repeat resume behaviours craft's execute
+cases detect and are `merge_only`. `unattended-pr-step-starts-fresh-after-a-finished-plan` is a core case too: it
+detects the PR step's own fresh start after a finished earlier ritual.

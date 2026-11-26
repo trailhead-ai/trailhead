@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: unattended-execute-takes-over-an-interrupted-block-and-reaches-dispatch
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh
