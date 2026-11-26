@@ -29,10 +29,12 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("PORTAGE_CACHE_DIR", str(e.cache))
     plugin = e.repo / "plugins" / "p"
     files = {
-        "evals/c1/case.yaml": "name: c1\n",
+        "evals/c1/case.yaml": "name: c1\nscaffold: scaffold.sh\n",
         "evals/c1/fixtures/seed.txt": "seed\n",
-        "evals/c2/case.yaml": "name: c2\n",
+        "evals/c2/case.yaml": "name: c2\nscaffold: fixture-env.sh\n",
         "evals/scaffold.sh": "echo scaffold\n",
+        "evals/fixture-env.sh": "echo env\n",
+        "evals/README.md": "corpus notes\n",
         "evals/eval-gate.json": "{}\n",
         "evals/notes/readme.md": "not a scaffold\n",
         "skills/s/SKILL.md": "measured prose\n",
@@ -179,6 +181,8 @@ class TestMisses:
         pytest.param(_edit(lambda e: e.plugin / "skills/other/OTHER.md"), id="unrelated-plugin-file"),
         pytest.param(_edit(lambda e: e.plugin / "evals/c2/case.yaml"), id="another-cases-file"),
         pytest.param(_edit(lambda e: e.plugin / "evals/eval-gate.json"), id="the-mapping-file"),
+        pytest.param(_edit(lambda e: e.plugin / "evals/fixture-env.sh"), id="a-shared-file-only-another-case-names"),
+        pytest.param(_edit(lambda e: e.plugin / "evals/README.md"), id="the-corpus-readme"),
         pytest.param(_edit(lambda e: e.plugin / "evals/notes/readme.md"), id="a-subdirectory-of-evals"),
     ])
     def test_a_change_outside_the_inputs_is_still_a_hit(self, env, change):
@@ -274,6 +278,80 @@ class TestFingerprint:
         a = self._fp(env)
         os.chmod(env.plugin / "skills/s/SKILL.md", 0o755)
         assert self._fp(env) != a
+
+
+class TestSharedFilesInTheKey:
+    def _fp(self, env):
+        return cache.fingerprint(env.plugin, env.cases[0])
+
+    def _write(self, env, rel, text):
+        p = env.plugin / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+
+    def _changes(self, env, rel):
+        before = self._fp(env)
+        p = env.plugin / rel
+        p.write_text(p.read_text() + "# changed\n")
+        return self._fp(env) != before
+
+    def test_a_shared_file_a_scaffold_it_reaches_names_is_in_the_key(self, env):
+        self._write(env, "evals/scaffold.sh", "source helper-a.sh\n")
+        self._write(env, "evals/helper-a.sh", "source helper-b.sh\n")
+        self._write(env, "evals/helper-b.sh", "echo leaf\n")
+        self._write(env, "evals/helper-c.sh", "echo c\n")
+        self._write(env, "evals/c2/other.md", "uses helper-c.sh\n")
+        assert self._changes(env, "evals/helper-a.sh")
+        assert self._changes(env, "evals/helper-b.sh")
+        assert not self._changes(env, "evals/helper-c.sh")
+
+    def test_a_cycle_between_shared_files_terminates_and_both_are_in_the_key(self, env):
+        self._write(env, "evals/scaffold.sh", "source helper-a.sh\n")
+        self._write(env, "evals/helper-a.sh", "source helper-b.sh\n")
+        self._write(env, "evals/helper-b.sh", "source helper-a.sh\n")
+        assert self._changes(env, "evals/helper-a.sh")
+        assert self._changes(env, "evals/helper-b.sh")
+
+    def test_a_name_in_a_case_files_prose_is_in_the_key(self, env):
+        self._write(env, "evals/helper-p.sh", "echo p\n")
+        assert not self._changes(env, "evals/helper-p.sh")
+        self._write(env, "evals/c1/expected.md", "The scaffold sources helper-p.sh.\n")
+        assert self._changes(env, "evals/helper-p.sh")
+
+    def test_a_name_in_a_nested_case_file_is_in_the_key(self, env):
+        self._write(env, "evals/c1/fixtures/deep/run.sh", "bash ../../../helper-n.sh\n")
+        self._write(env, "evals/helper-n.sh", "echo n\n")
+        assert self._changes(env, "evals/helper-n.sh")
+
+    def test_the_mapping_file_stays_out_of_the_key_even_when_a_case_names_it(self, env):
+        self._write(env, "evals/helper-m.sh", "echo m\n")
+        self._write(env, "evals/c1/expected.md", "Reads eval-gate.json and helper-m.sh.\n")
+        assert self._changes(env, "evals/helper-m.sh")
+        assert not self._changes(env, "evals/eval-gate.json")
+
+    def test_a_symlink_directly_under_evals_makes_every_case_uncacheable(self, env):
+        outside = env.tmp / "outside.txt"
+        outside.write_text("x\n")
+        (env.plugin / "evals/link.sh").symlink_to(outside)
+        assert self._fp(env) is None
+        assert cache.fingerprint(env.plugin, env.cases[0] | {"case": "c2"}) is None
+
+    def test_a_real_corpus_case_keys_on_the_scaffold_it_names_only(self, tmp_path):
+        src = Path(__file__).resolve().parents[1] / "plugins" / "portage"
+        plugin = tmp_path / "portage"
+        shutil.copytree(src / "evals", plugin / "evals", symlinks=True)
+        entry = {"plugin_root": "plugins/portage", "case": "unattended-pr-step-never-merges",
+                 "runs": 3, "pass_at": 2, "runner": RUNNER}
+
+        def moves(rel):
+            before = cache.fingerprint(plugin, entry)
+            p = plugin / rel
+            p.write_text(p.read_text() + "changed\n")
+            return cache.fingerprint(plugin, entry) != before
+
+        assert moves("evals/pr-step-scaffold.sh")
+        assert not moves("evals/approval-fixture-env.sh")
+        assert not moves("evals/README.md")
 
 
 class TestNeverCachedOrServed:
