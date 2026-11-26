@@ -36,7 +36,8 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
                                       # entry): the files derived at the base and at head, each once
                 "merge_only": bool,
                 "new_runner_grants": bool,
-                "case_removed": bool}, ...]}   # true: selected, but its case.yaml is gone at head
+                "case_removed": bool,   # true: selected, but its case.yaml is gone at head
+                "paused": bool}, ...]}  # true: HEAD's mapping of the corpus says "paused": true
 
 The push tier leaves out the cases mapped ``merge_only``; the merge tier selects every touched
 case. ``select_touched`` returns every touched case, ``merge_only`` included; ``plan`` filters
@@ -54,6 +55,9 @@ is flagged ``new_runner_grants``; ``run`` records each of its cases as not-run
 nothing to ``total_max_cost_usd``. A selected case whose ``case.yaml`` is gone at head
 stays in the plan with ``case_removed`` true; ``run`` records it as not-run
 ``case-removed-on-branch`` without starting a runner, and it adds nothing to
+``total_max_cost_usd``. A selected case whose corpus HEAD's mapping marks ``"paused": true`` stays in the plan
+with ``paused`` true (the pause is read at HEAD, so a branch that lifts it runs the case); ``run`` records it as
+not-run ``corpus-paused`` without starting a runner, and it adds nothing to
 ``total_max_cost_usd``. Every corpus path must pass ``mapping.valid_corpus_path``, else the
 plan is ``mapping-invalid``. So is a plan where, with every file read from the commits through one cached
 ``git cat-file --batch`` reader per revision and plugin root (a dying or short reader is a fault, never an
@@ -505,6 +509,7 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
                     "split_procedure": any(d.split for d in declared),
                     "merge_only": marked,
                     "new_runner_grants": base_map is None,
+                    "paused": head_map is not None and head_map.paused,
                     "case_removed": tree.get((plugin / "evals" / name / "case.yaml").as_posix())
                                     not in _BLOB_MODES,
                 }
@@ -625,7 +630,7 @@ def select_touched_by_path(repo: Path, merge_base: str, paths: list[str], *,
 
 
 def _runs(case: dict) -> bool:
-    return not case["case_removed"] and not case["new_runner_grants"]
+    return not case["case_removed"] and not case["new_runner_grants"] and not case["paused"]
 
 
 TIERS = ("push", "merge")

@@ -16,6 +16,11 @@ the outcome**. It is expensive, so it is reserved for the instructions that
 actually decide something. Eval cases run through the plugin eval runner,
 `claude plugin eval`, and portage's push gate runs the ones a branch touches.
 
+A plugin's evals can be paused by the operator: its `evals/eval-gate.json` then
+carries a top-level `"paused": true`, the agent route refuses its cases, and the
+push gate does not run them. An agent that is refused records the eval as not run
+and carries on; see [The agent route](#the-agent-route).
+
 There are two routes to that runner. **An agent** (an executor, a helper it
 dispatches, any session that is not a person at a terminal) goes through the
 bare eval command: see [The agent route](#the-agent-route). **A person at a
@@ -97,7 +102,12 @@ is not inside the repository, pass `--repo <absolute repo path>` rather than
   run continues in the background by design. Exit 0 means started, 3 means the
   request was not run (a not-run block is printed), 2 means refused (a stderr line
   says why: an undeclared case, a plugin root outside the repo, a bad
-  `--require-version`).
+  `--require-version`, a plugin whose evals are paused).
+- When `start` refuses because the plugin's `evals/eval-gate.json` says
+  `"paused": true`, the operator has paused that plugin's evals and nothing was run.
+  Record the eval as not run in the task or work you are doing and carry on; do not
+  retry, route around it or run the eval another way. The operator re-enables the
+  evals by removing `"paused": true` from that file.
 - Run the printed `wait` command, again bare. It polls for up to 110 seconds by
   default (`--timeout-seconds N`, 1 to 540). **While it reports the request still
   running (exit 4, with a `wait again:` line), run the `wait again` command it

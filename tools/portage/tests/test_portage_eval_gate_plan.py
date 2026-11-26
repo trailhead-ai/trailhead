@@ -1609,7 +1609,7 @@ class TestDeclaredCases:
                     "needs_merge_model": mark, "push_model": base.runner.get("push_model"),
                     "merge_model": base.runner["model"],
                     "measures": list(dict.fromkeys((b.measures if b else ()) + (h.measures if h else ()))),
-                    "merge_only": case.merge_only, "new_runner_grants": False, "case_removed": False})
+                    "merge_only": case.merge_only, "new_runner_grants": False, "case_removed": False, "paused": False})
             return entries
 
         old = pre_change(_mapping(base_cases, runner), _mapping(head_cases, runner), "merge")
@@ -2507,3 +2507,78 @@ class TestLiveCorpusMergeOnlyCases:
         assert merge["merge_only_pending"] == 0
         assert sorted(c["case"] for c in merge["cases"] if c["merge_only"]) == merge_only
         assert not any(c["merge_only"] for c in push["cases"])
+
+
+def _paused_mapping(paused, cases: dict = M) -> str:
+    doc = {"schema_version": 1, "runner": RUNNER, "cases": cases}
+    if paused is not None:
+        doc["paused"] = paused
+    return json.dumps(doc)
+
+
+class TestPausedKey:
+    @pytest.mark.parametrize("value, expected", [(True, True), (False, False), (None, False)])
+    def test_only_boolean_true_pauses(self, value, expected):
+        from portage.eval_gate.mapping import load_mapping
+
+        assert load_mapping(_paused_mapping(value), "p/evals/eval-gate.json").paused is expected
+
+    @pytest.mark.parametrize("value", ["true", 1, 0, None, [], {}])
+    def test_a_non_boolean_value_is_a_mapping_fault_naming_the_key(self, value):
+        assert "paused must be a boolean" in _fault(
+            json.dumps({"schema_version": 1, "runner": RUNNER, "cases": {}, "paused": value}))
+
+
+class TestPausedCorpusInPlan:
+    def _two_corpora(self, repo, p_paused=True, q_paused=False):
+        _corpus(repo, "p", M)
+        _corpus(repo, "q", {"gamma": {"measures": ["skills/a.md"]}})
+        _write(repo, "p/evals/eval-gate.json", _paused_mapping(p_paused or None))
+        _write(repo, "q/evals/eval-gate.json",
+               _paused_mapping(q_paused or None, {"gamma": {"measures": ["skills/a.md"]}}))
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _write(repo, "q/skills/a.md", "changed\n")
+        _commit(repo)
+
+    def test_a_paused_corpus_is_marked_on_its_entries_and_its_neighbour_is_not(self, repo, capsys):
+        self._two_corpora(repo)
+        rc, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert rc == 0
+        assert plan["status"] == "cases-selected"
+        assert {(c["plugin_root"], c["case"]): c["paused"] for c in plan["cases"]} == {
+            ("p", "alpha"): True, ("q", "gamma"): False}
+
+    def test_a_paused_case_adds_nothing_to_the_planned_cost(self, repo, capsys):
+        self._two_corpora(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["total_max_cost_usd"] == RUNNER["max_cost_usd"]
+
+    def test_a_plan_whose_every_case_is_paused_costs_nothing_and_is_not_an_error(self, repo, capsys):
+        self._two_corpora(repo, q_paused=True)
+        rc, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert rc == 0
+        assert all(c["paused"] for c in plan["cases"]) and plan["cases"]
+        assert plan["total_max_cost_usd"] == 0
+
+    def test_the_pause_is_read_at_head_so_unpausing_on_the_branch_runs_the_case(self, repo, capsys):
+        _corpus(repo, "p", M)
+        _write(repo, "p/evals/eval-gate.json", _paused_mapping(True))
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json", _paused_mapping(None))
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert [c["paused"] for c in plan["cases"]] == [False]
+
+    def test_the_pause_is_read_at_head_so_pausing_on_the_branch_pauses_the_case(self, repo, capsys):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json", _paused_mapping(True))
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert [c["paused"] for c in plan["cases"]] == [True]

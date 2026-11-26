@@ -20,6 +20,14 @@ for one PR. The merge-tier gate follows the same rule: `monitor` skips it for a 
 and `portage merge` applies its backstop (see "Before merge") only when the group setting is true or
 `--eval-state` is given for the repo.
 
+## Paused corpora
+
+A plugin's `evals/eval-gate.json` with `"paused": true` at the top level pauses every eval of that corpus. The
+gate keeps its touched cases in the plan, read from the mapping at `HEAD`, and `run` records each as not-run
+`corpus-paused` without starting a runner or counting any cost. The verdict and PR section say the corpus is
+paused, and the not-run never stops a push or a merge, whatever the case's tier or kind. A mapping whose `paused`
+is not a JSON boolean is invalid.
+
 ## Trust model
 
 The gate runs the branch's own eval cases with the runner's `--scaffold` and `--trust-plugin` flags. Scaffold
@@ -152,7 +160,7 @@ pass-cache fingerprint (null when uncacheable), the runner's version, whether `P
 runner, the tier, the verdict and reason, the call's timeout, the case's wall time without a fresh canary's, and
 each run's pass, error, duration and cost figures. A `timeout` is written with the runs that came back. A cache
 hit, and a not-run decided before any runner started (`case-removed-on-branch`, `corpus-new-on-branch`,
-`head-moved`, a harness with no eval runner, a failed canary) write nothing. A `runner-missing` decision writes
+`corpus-paused`, `head-moved`, a harness with no eval runner, a failed canary) write nothing. A `runner-missing` decision writes
 no line either, including one where a later batch fails to launch: the eval core's not-run result already drops the
 earlier batches' runs, so there is nothing to record. A file over 5 MB is renamed to
 `history.1.jsonl` before the next line, so two generations are kept. A history that cannot be written prints one

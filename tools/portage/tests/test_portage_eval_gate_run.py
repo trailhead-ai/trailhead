@@ -679,6 +679,25 @@ class TestCorpusNewOnBranch:
         assert env.result()["verdict"] == "pass"
 
 
+class TestCorpusPaused:
+    def test_a_case_of_a_paused_corpus_is_not_run_and_starts_no_runner(self, env):
+        env.cases[0]["paused"] = True
+        env.plan()
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"], r["errored"]) == ("not-run", "corpus-paused", 3)
+        assert env.calls == [] and not env.started
+        assert not (env.state / "canary.json").exists()
+
+    def test_a_case_of_a_corpus_that_is_not_paused_still_runs(self, env):
+        env.cases[0]["paused"] = False
+        env.plan()
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        assert env.result()["verdict"] == "pass"
+
+
 class TestUnexpectedErrors:
     def test_a_crash_inside_the_run_records_runner_error_and_exits_non_zero(self, env, monkeypatch, capsys):
         from portage.eval_gate import canary

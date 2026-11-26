@@ -630,6 +630,32 @@ def test_a_not_run_for_a_new_corpus_says_the_grants_are_unreviewed_and_still_pus
     assert "new-runner-grants" in sec
 
 
+def test_a_not_run_for_a_paused_corpus_says_the_operator_paused_it_and_still_pushes(st, capsys):
+    st.plan([_entry("held", root="plugins/demo")])
+    st.result("held", verdict="not-run", reason="corpus-paused", passed=0, errored=3)
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0] == "eval-gate: not-run"
+    assert lines[1] == "persistent: none"
+    assert ("`held` — `corpus-paused`: this corpus's evals are paused by the operator, so its cases "
+            "were not run") in section_of(out)
+
+
+class TestPausedCorpusAtTheMergeTier:
+    def test_a_paused_merge_only_case_does_not_stop_the_change(self, st, capsys):
+        _slow_not_run(st, "corpus-paused")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "merge-only-not-run" not in out
+
+    def test_a_paused_split_case_does_not_stop_the_change(self, st, capsys):
+        _split_plan(st, result="not-run", reason="corpus-paused")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "split-procedure-not-run" not in out
+
+
 def test_tree_dirty_stops_the_push_with_the_commit_or_stash_message(st, capsys):
     st.plan([], status="tree-dirty")
     code, out, _ = verdict(capsys, st)

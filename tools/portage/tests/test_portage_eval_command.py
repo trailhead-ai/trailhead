@@ -394,6 +394,48 @@ class TestStart:
         assert "request:" not in out
 
 
+class TestPausedCorpus:
+    def _pause(self, ws, doc):
+        (ws.repo / "plugins" / "p" / "evals" / "eval-gate.json").write_text(json.dumps(doc))
+
+    def test_start_refuses_every_case_of_a_paused_plugin_and_starts_nothing(self, ws):
+        self._pause(ws, {**MAPPING, "paused": True})
+        rc, out, err = ws.start("c1", "c2")
+        assert rc == 2
+        assert "plugins/p" in err and "paused by the operator" in err and "nothing was run" in err
+        assert '"paused": true' in err and "evals/eval-gate.json" in err
+        assert "request:" not in out
+        assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
+        assert ws.count("case-started-c1") == 0 and ws.count("case-started-c2") == 0
+
+    @pytest.mark.parametrize("value", [False, None])
+    def test_a_plugin_that_is_not_paused_starts_as_before(self, ws, value):
+        self._pause(ws, MAPPING if value is None else {**MAPPING, "paused": value})
+        request_id = ws.started("c1")
+        assert ws.wait(request_id)[0] == 0
+
+    def test_a_mapping_whose_pause_is_not_a_boolean_is_refused_as_invalid(self, ws):
+        self._pause(ws, {**MAPPING, "paused": "true"})
+        rc, out, err = ws.start("c1")
+        assert rc == 2
+        assert "mapping invalid" in err and "paused" in err
+        assert "request:" not in out
+
+    def test_pausing_is_per_plugin_so_a_sibling_plugin_still_starts(self, ws):
+        sibling = ws.repo / "plugins" / "s"
+        (sibling / "skills").mkdir(parents=True)
+        (sibling / "skills" / "x.md").write_text("x")
+        (sibling / "evals" / "c1").mkdir(parents=True)
+        (sibling / "evals" / "c1" / "case.yaml").write_text("name: x\n")
+        (sibling / "evals" / "eval-gate.json").write_text(json.dumps(
+            {**MAPPING, "cases": {"c1": MAPPING["cases"]["c1"]}}))
+        self._pause(ws, {**MAPPING, "paused": True})
+        assert ws.start("c1", plugin="plugins/p")[0] == 2
+        rc, out, err = ws.start("c1", plugin="plugins/s")
+        assert rc == 0, err
+        assert "request:" in out
+
+
 class TestWorker:
     def test_a_failing_canary_reports_every_case_not_run_runner_broken_and_never_starts_a_case(self, ws):
         ws.set("canary-mode", "fail")

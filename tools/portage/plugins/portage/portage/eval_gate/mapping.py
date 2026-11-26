@@ -11,7 +11,8 @@ Shape::
                           "runs": int (optional, default 3),
                           "pass_at": int (optional),
                           "merge_only": bool (optional, default false),
-                          "needs_merge_model": str (optional)}}}
+                          "needs_merge_model": str (optional)}},
+     "paused": bool (optional, default false)}
 
 A case names what a change can affect by ``measures`` (every file it reads), by a declaration, or both. The
 declaration is ``entry``, the skill or agent the case starts from, plus ``branches``, the procedure files it may
@@ -29,6 +30,8 @@ single-line parenthesised argument of printable ASCII (0x20-0x7E) holding no par
 brackets and tracks them with a flag, not a depth, so a bracket inside an argument could carry a second grant in one
 entry; control characters, line terminators and all other non-ASCII are refused too), and
 ``runner.max_cost_usd`` a finite number in (0, 25].
+``paused`` is a boolean; true means the operator has paused every eval of the corpus (``portage eval start``
+refuses its cases and the gate does not run them), false or absent means not paused. Any other value is a fault.
 ``merge_only`` marks a case the push tier leaves out; it must be a boolean.
 ``runner.push_model`` is the model the push tier runs every case on (same shape as ``runner.model``,
 which the merge tier uses); it is carried in the runner dict only when configured.
@@ -71,7 +74,7 @@ MAX_BLOB_BYTES = 1 << 20
 MAX_CASE_LIST = 64
 ECHO_SAFE = re.compile(r"^[A-Za-z0-9._/-]{1,120}\Z")
 
-_TOP_KEYS = {"schema_version", "runner", "cases"}
+_TOP_KEYS = {"schema_version", "runner", "cases", "paused"}
 _RUNNER_REQUIRED = {"model", "allow_tools", "max_cost_usd"}
 _RUNNER_KEYS = _RUNNER_REQUIRED | {"push_model"}
 _CASE_KEYS = {"measures", "entry", "branches", "runs", "pass_at", "merge_only", "needs_merge_model"}
@@ -101,6 +104,7 @@ class Case:
 class Mapping:
     runner: dict
     cases: dict[str, Case]
+    paused: bool = False
 
 
 def valid_corpus_path(root: object) -> bool:
@@ -328,4 +332,7 @@ def load_mapping(
                                  f"{MAX_CASES_PER_MAPPING}")
     cases = {n: _case(i, n, o, file, plugin_root, evals_dir)
              for i, (n, o) in enumerate(data["cases"].items(), 1)}
-    return Mapping(runner, cases)
+    paused = data.get("paused", False)
+    if not isinstance(paused, bool):
+        raise MappingError(file, "paused must be a boolean")
+    return Mapping(runner, cases, paused)
