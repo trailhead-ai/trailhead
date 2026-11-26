@@ -45,9 +45,12 @@ craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from t
 
 - The command's three grants beyond `./lore` (`maturity_bars.py`, `:`) are for consult's calibration
   step; without them it refuses and never dispatches the council.
-- The four grants after those (`ledger_gate.py`, `candidate_set.py`, `mktemp`, `mktemp *`) are for
-  the slice ritual's spec-complete path, which pipes the ledger and candidate scripts and writes a
-  temp file. The two script grants lead with `*`, and a Bash rule's `*` matches any text, spaces
+- The grants after those (`ledger_gate.py` and `candidate_set.py`, each bare and with arguments,
+  then `mktemp`, `mktemp *` and `printenv TMPDIR`) are for the slice ritual, which pipes the spec
+  into the ledger and candidate scripts and writes a temp file. The bare forms cover a pipe that
+  passes the script no arguments (`./lore record show <spec> | <path>/scripts/ledger_gate.py`), and
+  `printenv TMPDIR` lets an agent find the temp directory without a shell variable, which the case
+  prompts rule out. The script grants lead with `*`, and a Bash rule's `*` matches any text, spaces
   included, so they allow any single command whose text contains
   `<anything>/scripts/ledger_gate.py <anything>` (or the `candidate_set.py` equivalent), whatever
   program runs it, not only the script itself. The existing `maturity_bars.py` grant has the same
@@ -73,26 +76,25 @@ craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from t
   arguments, as `Bash(mktemp)` and `Bash(mktemp *)` do.
 - The two grants `Bash(*/scripts/run_block.py)` and `Bash(*/scripts/run_block.py *)` are for the
   resumed unattended rituals, which pipe a record body into the run-block reader and read the
-  printed report: `<path>/scripts/run_block.py < <file>`. One covers the bare call and one the
-  call with arguments or a redirection, as the `migration_bar.py` pair does; the runner does not
-  split a command at a redirection, so `run_block.py < <file>` is allowed by the `*` form. Their
-  leading `*` has the same shape as the script grants above, so they admit any single command whose
-  text contains `<anything>/scripts/run_block.py` (or that text followed by anything), whatever
-  program runs it. The reader only reads stdin and prints; it writes nothing. The cases that
-  measure it install a wrapper at `./scripts/run_block.py` that logs the call and runs the real
-  copy.
+  printed report: `<path>/scripts/run_block.py < <file>`. One covers the bare call and one the call
+  with arguments or a redirection, as the `migration_bar.py` pair does; the runner does not split a
+  command at a redirection, so `run_block.py < <file>` is allowed by the `*` form. Their leading `*`
+  has the same shape as the script grants above, so they admit any single command whose text
+  contains `<anything>/scripts/run_block.py` (or that text followed by anything), whatever program
+  runs it. The reader only reads stdin and prints; it writes nothing. The cases that measure it
+  install a wrapper at `./scripts/run_block.py` that logs the call and runs the real copy.
 - The `pending_check.py *` and `observation_gate.py` grants are for the close's manual-check
   discharge in `skills/_shared/execute.md`, run by the cases `close-defers-an-unconfirmed-check`,
   `stale-write-leaves-the-slice-open` and `one-failed-check-saves-nothing`. `pending_check.py *`
   runs the pending-check writer and its `describe` and `verify` modes; its leading `*` has the same
   shape as the script grants above, so it admits any single command whose text contains
-  `<anything>/scripts/pending_check.py <anything>`. `observation_gate.py` takes no argument, and
-  the grant admits exactly that. Those cases write their entries file with the file-write tool
-  under the runner block's bare `Write` grant, which applies to every craft case and is not
-  confined by the sandbox; a smoke run found that the runner honours a path-scoped `Edit(...)`
-  rule for the file-write tool (`Edit(//private/tmp/e-*/**)` on macOS) where a path-scoped
-  `Write(...)` rule is denied, so the bare grant can be narrowed to the run directory once every
-  case that relies on it is checked under the narrower rule.
+  `<anything>/scripts/pending_check.py <anything>`. `observation_gate.py` takes no argument, and the
+  grant admits exactly that. Those cases write their entries file with the file-write tool under the
+  runner block's bare `Write` grant, which applies to every craft case and is not confined by the
+  sandbox; a smoke run found that the runner honours a path-scoped `Edit(...)` rule for the
+  file-write tool (`Edit(//private/tmp/e-*/**)` on macOS) where a path-scoped `Write(...)` rule is
+  denied, so the bare grant can be narrowed to the run directory once every case that relies on it
+  is checked under the narrower rule.
 - The nine `git` grants are pinned to the forms the no-ask close's branch recovery and push step
   runs: `git status --porcelain`, `git rev-parse --verify --quiet refs/heads/*`, `git rev-parse
   --verify --quiet refs/remotes/origin/*`, `git fetch origin`, `git symbolic-ref --short HEAD`,
@@ -105,11 +107,11 @@ craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from t
   (`--discard-changes`, `--detach`), and `git log origin/*` admits `--output=<path>`, which writes a
   file the sandbox allows.
 - **What the grants bound.** Every grant that leads with `*` (`maturity_bars.py`, `ledger_gate.py`,
-  `candidate_set.py`, `covers_gate.py`, `migration_bar.py`, `run_block.py`, `pending_check.py`) matches any single command that ends in
-  or contains that script path, whatever program runs it. So the set of commands a case can run is
-  bounded by the runner's sandbox, not by these patterns. The grants shape only the eval runner;
-  they are never installed and change nothing for a real install. Anchoring them is a runner change,
-  logged as a follow-up, and the grants stay as they are.
+  `candidate_set.py`, `covers_gate.py`, `migration_bar.py`, `run_block.py`, `pending_check.py`)
+  matches any single command that ends in or contains that script path, whatever program runs it. So
+  the set of commands a case can run is bounded by the runner's sandbox, not by these patterns. The
+  grants shape only the eval runner; they are never installed and change nothing for a real install.
+  Anchoring them is a runner change, logged as a follow-up, and the grants stay as they are.
 - A consult run takes about 2 minutes and about 0.75 USD (its limits are
   `allowed_tools: [Skill, Agent, Read, Glob, Grep]`, `max_turns: 30`, `timeout_seconds: 420`). A
   review-case run takes about 0.2 to 0.35 USD. The runner's reported `turns` is wrong when subagents
@@ -135,17 +137,19 @@ names under "Under test". The two review-correction cases measure
 `skills/_shared/council.md`. A case with no entry is a failure: add its entry when you add the case.
 
 A case marked `"merge_only": true` runs before merge, not on every push. On the heavily shared files
-(`skills/_shared/execute.md`, `skills/_shared/unattended.md`, `skills/slice/SKILL.md`, `skills/plan/SKILL.md`)
-the core cases are the detectors, one per behaviour the file decides, and the other cases are `merge_only`.
-A case that also measures a file with no `merge_only` case, or that runs past the 540 s gate budget, stays
-core, and every measured file keeps at least one core case. Say which tier a new case is in when you add it.
+(`skills/_shared/execute.md`, `skills/_shared/unattended.md`, `skills/slice/SKILL.md`,
+`skills/plan/SKILL.md`) the core cases are the detectors, one per behaviour the file decides, and
+the other cases are `merge_only`. A case that also measures a file with no `merge_only` case, or
+that runs past the 540 s gate budget, stays core, and every measured file keeps at least one core
+case. Say which tier a new case is in when you add it.
 
 The resumed-run cases (`unattended-plan-*` and `unattended-execute-*` that also measure
-`scripts/run_block.py`) keep their detectors in execute: each execute case detects one resume behaviour and
-is core. The plan cases that repeat a behaviour execute already detects (an answered question, a re-parked
-question, an outcome-less block, a takeover) are `merge_only`; the plan cases for behaviours only plan
-decides (a finished block, an unmatched answer, the missing planned children, a correction parked at the
-end) stay core, as do the two that resume a run to its end, which run past the gate budget.
+`scripts/run_block.py`) keep their detectors in execute: each execute case detects one resume
+behaviour and is core. The plan cases that repeat a behaviour execute already detects (an answered
+question, a re-parked question, an outcome-less block, a takeover) are `merge_only`; the plan cases
+for behaviours only plan decides (a finished block, an unmatched answer, the missing planned
+children, a correction parked at the end) stay core, as do the two that resume a run to its end,
+which run past the gate budget.
 
 The `runner` block holds the grants of that batch command, the model `claude-opus-5-5`, and
 `max_cost_usd` 3.5 per case. The cap is sized from the logged cost: the consult case is the dearest
@@ -158,11 +162,11 @@ headroom over the largest batch.
 `slice-closes-a-stuck-slice-and-chooses-the-next`, `slice-still-refuses-an-unfinished-open-slice`,
 `slice-unattended-closes-a-stuck-slice-and-chooses-the-next`,
 `slice-refuses-when-the-drafted-check-is-refused`,
-`slice-refuses-when-the-slice-repository-is-not-here` and
-`slice-refuses-a-blocked-parent` share one scaffold, the first
-case's `fixtures/scaffold.sh`, driven by an `ARM` variable. It installs logging wrappers in `./scripts/`
-for the gates a slice pass runs (`ledger_gate`, `candidate_set`, `covers_gate`, `pending_check`,
-`observation_gate`), so every case maps `${CLAUDE_PLUGIN_ROOT}/scripts/` to `./scripts/`. No grant was
-added: the cases use the existing script, git, `mktemp` and `Write` grants. In the `credential` arm the
-`pending_check.py` stand-in appends a credential-shaped token to the drafted `check` before the real
-writer reads it, so the real waiting gate refuses.
+`slice-refuses-when-the-slice-repository-is-not-here` and `slice-refuses-a-blocked-parent` share one
+scaffold, the first case's `fixtures/scaffold.sh`, driven by an `ARM` variable. It installs logging
+wrappers in `./scripts/` for the gates a slice pass runs (`ledger_gate`, `candidate_set`,
+`covers_gate`, `pending_check`, `observation_gate`), so every case maps
+`${CLAUDE_PLUGIN_ROOT}/scripts/` to `./scripts/`. No grant was added: the cases use the existing
+script, git, `mktemp` and `Write` grants. In the `credential` arm the `pending_check.py` stand-in
+appends a credential-shaped token to the drafted `check` before the real writer reads it, so the
+real waiting gate refuses.
