@@ -829,7 +829,7 @@ only carrying a written justification that names what it enables and why that ca
 the slice needing it, and only when the slice it enables comes next. Write that justification in
 place of a value claim — everything else in this procedure treats it the same way. A create
 criterion this step sets aside counts as the slice a read-only first slice enables, and as creation
-for the first-slice rule (see `_shared/slice.md`'s "The first slice on a surface").
+for the first-slice rule. That rule is `_shared/slice.md`'s "The first slice on a surface".
 
 If no candidate clears the value floor and no enabler applies, stop instead of choosing anyway —
 take the early-stop path described in step 6 above.
