@@ -8,12 +8,14 @@ exactly as the procedure gives them, with no session flag of its own.
 
 Each test runs a case's real scaffold in a fenced HOME, logs a candidate through each wrapper it wrote
 with the runner's session in the environment and no flag, and reads where it landed. A scaffold that
-writes no wrapper has nothing to supply a session, so its test ends once the scaffold has built cleanly.
+writes no wrapper has nothing to supply a session, so its test ends once the scaffold has built cleanly and the case's prompt is shown not to name
+lore (graders are left out: one may assert lore is never called).
 """
 
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -63,11 +65,11 @@ def test_every_wrapper_the_scaffold_writes_logs_to_the_case_session(tmp_path, sc
     wrappers = [w for w in (cwd / "lore", cwd / "bin" / "lore") if w.is_file()]
     if not wrappers:
         case = scaffold.parents[1]
-        texts = [case / "prompt.md", *sorted((case / "graders").rglob("*"))]
-        names_lore = [
-            t.name for t in texts if t.is_file() and "lore " in t.read_text(encoding="utf-8")
-        ]
-        assert not names_lore, f"case uses lore but its scaffold writes no wrapper: {names_lore}"
+        prompt = case / "prompt.md"
+        names_lore = prompt.is_file() and re.search(
+            r"\blore\b", prompt.read_text(encoding="utf-8"), re.IGNORECASE
+        )
+        assert not names_lore, "case prompt names lore but its scaffold writes no wrapper"
         return
 
     for n, wrapper in enumerate(wrappers):
