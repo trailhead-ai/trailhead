@@ -6,8 +6,9 @@ Two surfaces, both terminal text with no colour and no ANSI escapes.
   an open slice on the spec. Today any open slice is a refusal. With this surface, a slice whose
   build is finished and whose only unmet close condition is a manual check not yet carried out is
   closed by the pass: the build's own close runs, its checks go on the check list as pending checks,
-  and the pass goes on to choose the next slice. An open slice that is still being built is refused
-  exactly as today.
+  and the pass goes on to choose the next slice. The driver's own pass closes such a slice the same
+  way and then stops at that boundary. An open slice that is still being built, or one set aside as
+  `blocked`, is refused exactly as today.
 - **The close's report under the driver** (`/craft:drive`, at the end of its build phase). Today the
   close asks the operator about each manual check. Under the driver it asks nothing: every check not
   yet carried out goes on the check list, and the slice ends at the boundary as a completed slice.
@@ -49,9 +50,14 @@ See the list any time with:
 ```
 
 After this block the pass reports exactly what it reports today — the termination basis, the chosen
-slice and its value claim, or an early stop. A slice task that was set aside as `blocked` because of
-this check is closed the same way: the pass moves it back to in progress first, because the build's
-close only runs on a slice in progress, and the report says nothing different for it.
+slice and its value claim, or an early stop.
+
+When the driver finds such a slice at the start of its run, it closes it the same way and stops
+there. It reports that the slice's branch is pushed and a pull request is owed, naming the branch
+and `/portage:pull_request`, and chooses no other slice in that run.
+
+A slice task set aside as `blocked` is never closed by a pass, whatever blocked it, because the pass
+cannot tell why it was set aside. It is refused as in the next state.
 
 A slice whose earlier close got as far as moving the criterion to partly covered and then stopped
 (the waiting entry is already on the spec) is still found stuck, and the same close finishes it
@@ -83,8 +89,9 @@ or drop it explicitly.
 ```
 
 The reason line names one of: the build is not finished (a child task is not done, or an end phase
-before the close is not ticked); a covered criterion has no evidence and is not a manual check; its
-last push failed and needs settling by hand; or this install is too old to close it — lore cannot
+before the close is not ticked); a covered criterion has no evidence and is not a manual check; it is
+set aside as blocked, with the remedy to set it back to in progress or to close it yourself with
+`/craft:execute task/<slice>`; its last push failed and needs settling by hand; or this install is too old to close it — lore cannot
 make the guarded write the close needs — with the remedy to update trailhead (`trailhead update`)
 and run the pass again.
 When the pass cannot tell — a record it cannot read, a search that errored — it refuses as today and
@@ -94,10 +101,9 @@ names the failure, never closing anything on a guess.
 
 The pass found a stuck slice and ran its close, but the write of the waiting entry to the spec was
 refused or failed. The slice did not close — so it is still open, and the pass refuses to choose a new
-slice. Nothing else on the slice task was changed; when it had been set aside as `blocked`, the
-report says so in its own line — "It had been set aside as blocked; it is now in progress." — because
-a slice whose close is still owed is in progress, and the next pass tries again. The report names the criterion and the reason in the
-gate's own vocabulary, never by echoing the text it refused:
+slice. Nothing else on the slice task was changed, so it is still in progress and the next pass
+tries again. The report names the criterion and the reason in the gate's own vocabulary, never by
+echoing the text it refused:
 
 ```
 Tried to close task/an-owner-subscribes-with-tax-calculated-on-their-invoices, which was waiting
