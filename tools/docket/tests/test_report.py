@@ -255,6 +255,19 @@ class TestLookupFailures:
         assert [e["status_unknown"] for e in doc["vaults"][0]["entries"]] == [False] * 5 + [True] * 3
 
 
+    def test_a_tight_cap_looks_up_every_vaults_first_entries_before_any_vaults_deeper_ones(
+            self, tmp_path, monkeypatch, capsys):
+        capped = Env(tmp_path, monkeypatch, capsys, cap=9)
+        for vault in ("proj", "other", "team"):
+            capped.lst(vault, *[f"t{i}" for i in range(8)])
+        capped.store.write_order(["proj", "other", "team"])
+        _, doc, _ = capped.run()
+        for vault in doc["vaults"]:
+            assert [e["status_unknown"] for e in vault["entries"]] == [False] * 3 + [True] * 5, vault["name"]
+        looked_up = [f"{c[5]}/{c[6]}" for c in capped.fake.shows()]
+        assert len(looked_up) == len(set(looked_up)) == 9
+
+
 class TestUnreadableLists:
     @pytest.mark.parametrize("content", [
         '<<<<<<< HEAD\n{"secret": "SECRET-CONTENT"}\n=======\n{}\n>>>>>>> theirs\n',

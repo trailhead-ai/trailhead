@@ -8,7 +8,9 @@
 4. `lore sync` again, then the synced test, read from git and never from lore's exit code: the branch is
    not ahead of its upstream (a missing upstream prints no count, so it counts as not synced) and `sites/docket` has no
    uncommitted change.
-5. Under the lock, re-read each touched list and check the change is still there. Lore settles a
+5. Under the lock, re-read each touched list and check the change is still there. A re-read that fails
+   (a newer-format copy, a lock timeout) cannot show the change gone, so the write that landed reports
+   as saved-not-synced. Lore settles a
    conflicting `sites/` file by taking the remote copy outright and still reports `published`, so only
    this re-read shows a change another host replaced.
 
@@ -29,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
-from docket.store import DocketList, Runner, Store, Workspace
+from docket.store import DocketList, Runner, Store, StoreError, Workspace
 
 SAVED = "saved"
 SAVED_NOT_SYNCED = "saved-not-synced"
@@ -142,8 +144,12 @@ def run_pipeline(runner: Runner, store: Store, default_vault: str, apply: Callab
     if post:
         warnings.append(post)
     synced = post is None and is_synced(runner, store.vault_root)
-    with store.locked():
-        now = {vault: store.read_list(vault) for vault in applied.lists}
+    try:
+        with store.locked():
+            now = {vault: store.read_list(vault) for vault in applied.lists}
+    except (OSError, StoreError) as exc:
+        warnings.append(f"could not re-read the saved lists after the sync: {exc}")
+        return Report(SAVED_NOT_SYNCED, applied, applied.lists, "; ".join(warnings))
     survived = all(exp.holds(now[exp.vault]) for exp in applied.expect)
     if not survived:
         outcome = LOST_TO_REMOTE

@@ -126,6 +126,17 @@ def _interleave(columns: list[list[dict]]) -> list[dict]:
     return [c[i] for i in range(longest) for c in columns if i < len(c)]
 
 
+def _lookup_all(resolver: _Resolver, lists: dict[str, list[Entry] | None]) -> dict[tuple[str, int], _Lookup]:
+    """Look every entry up once, tier by tier across the vaults, so a tight budget starves the deepest entries."""
+    found: dict[tuple[str, int], _Lookup] = {}
+    longest = max((len(entries) for entries in lists.values() if entries), default=0)
+    for tier in range(longest):
+        for vault, entries in lists.items():
+            if entries and tier < len(entries):
+                found[vault, tier] = resolver.lookup(vault, entries[tier])
+    return found
+
+
 def build_report(runner: Runner, camp_runner: Runner, *, budget: float = LOOKUP_BUDGET_SECONDS,
                  cap: int = LOOKUP_CAP, clock: Callable[[], float] = time.monotonic) -> dict:
     vaults = configured_vaults(runner)
@@ -136,13 +147,20 @@ def build_report(runner: Runner, camp_runner: Runner, *, budget: float = LOOKUP_
         raise DocketError(f"cannot read the vault order file under {vaults.default_path}/sites/docket") from None
     state = camp.fetch(camp_runner)
     resolver = _Resolver(runner, budget, cap, clock)
+    lists: dict[str, list[Entry] | None] = {}
+    for vault in order:
+        try:
+            lists[vault] = list(store.read_list(vault).entries)
+        except StoreError:
+            lists[vault] = None
+    found = _lookup_all(resolver, lists)
     docs: list[dict] = []
     columns: list[list[dict]] = []
     for vault in order:
         doc: dict[str, Any] = {"name": vault}
-        try:
-            entries = [_entry_doc(vault, e, resolver.lookup(vault, e), state) for e in store.read_list(vault).entries]
-        except StoreError:
+        if lists[vault] is not None:
+            entries = [_entry_doc(vault, e, found[vault, i], state) for i, e in enumerate(lists[vault])]
+        else:
             doc.update(entries=[], live_count=0, over_limit=False,
                        error=f"cannot read {store.vault_root}/sites/docket/lists/{vault}.json")
             docs.append(doc)

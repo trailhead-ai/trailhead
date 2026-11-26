@@ -6,6 +6,7 @@ so the order of sync, read, write and sync is observed from what each sync call 
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 
@@ -15,6 +16,7 @@ from _docket_cli import completed, install, run_cli, vault_ls
 from trailhead.tests._git_support import hermetic_git_env  # noqa: F401  (fixture)
 
 from docket import changes
+from docket.store import Store
 
 DEFAULT = "proj"
 
@@ -647,3 +649,29 @@ class TestUnreadableList:
         code, doc, err = env.run("add", "--", ref("task/n1"))
         assert code == 1
         assert err.startswith("docket: ")
+
+
+class TestWriteLandedThenReReadFails:
+    def test_a_newer_format_remote_copy_after_the_write_is_saved_not_synced(self, env):
+        env.put(DEFAULT, *BASE)
+        newer = json.dumps({"version": 2, "entries": []})
+        env.fake.sync_hooks = {1: lambda fake: env.list_path().write_text(newer)}
+        code, doc, _ = env.run("add", "--", ref("task/n1"))
+        assert (code, doc["outcome"]) == (3, "saved-not-synced")
+        assert "newer docket" in doc["sync_warning"]
+
+    def test_a_lock_held_past_the_deadline_after_the_write_is_saved_not_synced(self, env):
+        env.put(DEFAULT, *BASE)
+        holder = contextlib.ExitStack()
+
+        def hold(fake):
+            holder.enter_context(Store(env.vault_dir).locked())
+
+        env.fake.sync_hooks = {1: hold}
+        try:
+            code, doc, _ = env.run("add", "--", ref("task/n1"))
+        finally:
+            holder.close()
+        assert (code, doc and doc["outcome"]) == (3, "saved-not-synced")
+        assert "docket lock" in doc["sync_warning"]
+        assert env.entries() == [*BASE, "task/n1"]

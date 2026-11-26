@@ -254,7 +254,7 @@ def _serialize_list(lst: DocketList) -> dict[str, Any]:
 class Store:
     """Strict reads, atomic locked writes and the vault order for one default vault.
 
-    `vault_root` is the default vault's directory (see `locate_default_vault` / `open_store`).
+    `vault_root` is the default vault's directory (see `locate_default_vault`).
     `lock_deadline` (seconds), `clock`, `sleep` and `replace` are injectable: a test supplies a
     fake clock to run the lock poll without waiting, and a replace that stalls to interrupt a write.
     """
@@ -527,8 +527,3 @@ class Store:
     def write_order(self, order: Iterable[str]) -> Change:
         names = tuple(order)
         return self.update_order(lambda _current: names)
-
-
-def open_store(runner: Runner = default_runner, **kwargs: Any) -> Store:
-    """A Store on the default vault located through `runner`; `kwargs` go to Store."""
-    return Store(locate_default_vault(runner), **kwargs)

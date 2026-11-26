@@ -45,8 +45,9 @@ def test_no_command_line_flag_moves_the_write_target(env, tmp_path, capsys, flag
 
 def test_a_ref_naming_another_vault_still_writes_inside_the_default_vault(env, tmp_path):
     env.fake.know(ref("task/n1", "other"))
-    code, doc, _ = env.run("add", "--", ref("task/n1", "other"))
-    assert (code, doc["outcome"]) == (0, "saved")
+    code, doc, err = env.run("add", "--", ref("task/n1", "other"))
+    assert code == 0, err
+    assert doc["outcome"] == "saved"
     assert env.entries("other") == ["task/n1"]
     assert _files(tmp_path / "vault" / "sites") == ["docket/lists/other.json"]
     assert not (tmp_path / "vault" / "other").exists()

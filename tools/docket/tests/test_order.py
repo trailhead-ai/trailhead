@@ -5,6 +5,7 @@ lock real files under tmp_path.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 
@@ -249,6 +250,24 @@ class TestVaultOrder:
         code, doc, _ = env.run("vault-order", "--", OTHER, DEFAULT)
         assert (code, doc["outcome"]) == (4, "lost-to-remote")
         assert doc["order"] == [DEFAULT]
+
+    def test_a_newer_format_remote_order_after_the_write_is_saved_not_synced(self, env):
+        newer = json.dumps({"version": 2, "order": []})
+        env.fake.sync_hooks = {1: lambda fake: order_file(env).write_text(newer)}
+        code, doc, _ = env.run("vault-order", "--", OTHER)
+        assert (code, doc["outcome"]) == (3, "saved-not-synced")
+        assert "newer docket" in doc["sync_warning"]
+
+    def test_a_lock_held_past_the_deadline_after_the_write_is_saved_not_synced(self, env):
+        holder = contextlib.ExitStack()
+        env.fake.sync_hooks = {1: lambda fake: holder.enter_context(Store(env.vault_dir).locked())}
+        try:
+            code, doc, _ = env.run("vault-order", "--", OTHER)
+        finally:
+            holder.close()
+        assert (code, doc["outcome"]) == (3, "saved-not-synced")
+        assert "docket lock" in doc["sync_warning"]
+        assert stored_order(env) == [OTHER]
 
     def test_an_order_the_remote_kept_is_saved(self, env):
         env.fake.sync_hooks = {1: lambda fake: None}

@@ -598,11 +598,6 @@ class TestLocateDefaultVault:
         with pytest.raises(S.StoreError):
             S.locate_default_vault(runner)
 
-    def test_open_store_uses_the_located_vault(self, vault):
-        runner, _ = _vls([{"name": "m", "scope": "default", "path": str(vault)}])
-        S.open_store(runner).write_list("proj", DocketList((ONE,)))
-        assert S.Store(vault).read_list("proj") == DocketList((ONE,))
-
 
 CASES = json.loads((FIXTURES / "cases.json").read_text())
 

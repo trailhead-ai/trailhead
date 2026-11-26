@@ -393,13 +393,22 @@ def _execute_vault_order(args: argparse.Namespace, runner: Runner, store_kwargs:
             return pipeline.Applied(change.changed, [{"ref": n, "status": "stored"} for n in names], {})
 
         report = pipeline.run_pipeline(runner, store, vaults.default_name, apply)
-        with store.locked():
-            stands = list(store.read_order())
-            effective = store.effective_order()
         outcome = report.outcome
-        if outcome in (pipeline.SAVED, pipeline.SAVED_NOT_SYNCED) and stands != names:
-            outcome = pipeline.LOST_TO_REMOTE
-        doc.update(_result(report, outcome, {}, order=effective))
+        extra: dict[str, Any] = {}
+        try:
+            with store.locked():
+                stands = list(store.read_order())
+                extra["order"] = store.effective_order()
+        except (OSError, StoreError) as exc:
+            if outcome not in (pipeline.SAVED, pipeline.SAVED_NOT_SYNCED):
+                raise
+            outcome = pipeline.SAVED_NOT_SYNCED
+            note = f"could not re-read the stored order after the sync: {exc}"
+            report.sync_warning = f"{report.sync_warning}; {note}" if report.sync_warning else note
+        else:
+            if outcome in (pipeline.SAVED, pipeline.SAVED_NOT_SYNCED) and stands != names:
+                outcome = pipeline.LOST_TO_REMOTE
+        doc.update(_result(report, outcome, {}, **extra))
     except (Refused, UnreadableListError, UnsafeNameError) as exc:
         doc.update(_refused(exc))
     return _emit(doc)
