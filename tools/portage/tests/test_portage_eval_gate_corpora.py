@@ -181,7 +181,14 @@ class TestRealEdit:
     def test_editing_prose_no_case_names_selects_nothing(self, throwaway, capsys):
         repo, rel, corpus = throwaway
         measured = _measured_by_expected(corpus)
-        unnamed = next(f for f in _prose_files(_plugin_root(corpus)) if f not in measured)
+        unnamed = next((f for f in _prose_files(_plugin_root(corpus)) if f not in measured), None)
+        if unnamed is None:
+            unnamed = "skills/unnamed-by-any-case/SKILL.md"
+            _git(repo, "checkout", "-q", "main")
+            (repo / rel / unnamed).parent.mkdir(parents=True)
+            (repo / rel / unnamed).write_text("# Named by no case\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-m", "a prose file no case names")
         _edit(repo, f"{rel.as_posix()}/{unnamed}")
         status, got = _selected(repo, capsys)
         assert (status, got) == ("no-cases-mapped", [])
