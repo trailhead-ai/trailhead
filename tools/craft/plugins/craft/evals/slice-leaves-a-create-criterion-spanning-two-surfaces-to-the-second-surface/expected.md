@@ -38,3 +38,7 @@ Every clause holds.
 - The fixture deliberately gives the command group no create criterion of its own, so it cannot show a slice that covers the command group's own create and still leaves the spanning one; it pins only that the spanning criterion is not pulled in.
 - If the chooser takes the web feed first, the covers graders fail in every arm; that is a fixture defect (plan unknown U1) and the fixture is tightened, not rerun away.
 - One fixture, one phrasing, one model tier, two runs as run.
+
+## Deviation from pre-registration (2026-11-25): the run directory supplies the session
+
+The prompt told the model to add `--session-id aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee` to its lore and script commands. Across the cases whose prompts carried that instruction, `claude-sonnet-5-5` runs sometimes left the flag off, so their entries went to the runner's own session, where no grader reads, and some placed it after a stdin redirect, which the run's permission grants refused: the prompt's extra argument, not the procedure under test, decided those runs. The case's lore wrappers now set the case's session themselves, as Claude Code sets a real session's, and the prompt no longer names the flag, so the model runs each command as the procedure writes it. No grader, fixture record or bar changed.

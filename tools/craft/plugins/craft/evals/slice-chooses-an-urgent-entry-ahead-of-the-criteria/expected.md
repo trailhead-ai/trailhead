@@ -43,3 +43,7 @@ A small `routes/` source tree is copied into the run directory. The scaffold wra
 - The parent's slug is the agent's choice, so its record path is not fixed; the parent-body graders read `created-bodies.log`, which holds the bodies lore accepted. A grader that read the record itself would need a pinned slug, which the prompt must not dictate.
 - The logged "urgent tier" decision lands in the parent's run block, whose path is not fixed, so no grader observes it. The judged urgent kinds are not exercised: no fixture entry is urgent by evidence alone.
 - One spec, one phrasing, one model tier.
+
+## Deviation from pre-registration (2026-11-25): the run directory supplies the session
+
+The prompt told the model to add `--session-id aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee` to its lore and script commands. Across the cases whose prompts carried that instruction, `claude-sonnet-5-5` runs sometimes left the flag off, so their entries went to the runner's own session, where no grader reads, and some placed it after a stdin redirect, which the run's permission grants refused: the prompt's extra argument, not the procedure under test, decided those runs. The case's lore wrappers now set the case's session themselves, as Claude Code sets a real session's, and the prompt no longer names the flag, so the model runs each command as the procedure writes it. No grader, fixture record or bar changed.

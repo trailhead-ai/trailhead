@@ -148,7 +148,7 @@ mkdir -p "$W/lore-plugin"
 cp -r "$repo_root/tools/lore/plugins/lore/cli" "$repo_root/tools/lore/plugins/lore/lore" "$W/lore-plugin/"
 [ -f "$repo_root/tools/lore/plugins/lore/_bootstrap.py" ] && cp "$repo_root/tools/lore/plugins/lore/_bootstrap.py" "$W/lore-plugin/" || true
 py=$(sed -n 's/.*exec \([^ ]*\) .*/\1/p' "$W/lore" | head -1)
-printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nLORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec %s "$here/lore-plugin/cli/lore" "$@"\n' "$py" > "$W/lore.real"
+printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nCLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec %s "$here/lore-plugin/cli/lore" "$@"\n' "$py" > "$W/lore.real"
 chmod +x "$W/lore.real"
 if [ "$LORE_WRITE" = "refuse" ]; then
   cat > "$W/lore" <<'LORE'

@@ -19,13 +19,13 @@ case "$base" in
 esac
 cp -r "$repo/tools/craft/plugins/craft/scripts" real-scripts
 rm -rf real-scripts/__pycache__
-printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nprintf "%%s\\n" "$*" >> "$here/lore-calls.log"\nLORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"\n' > lore
+printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nprintf "%%s\\n" "$*" >> "$here/lore-calls.log"\nCLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"\n' > lore
 # bin/lore is what the plugin's scripts reach as `lore`; their calls go to a log of their own.
 cat > bin/lore <<'EOW'
 #!/bin/sh
 here=$(cd "$(dirname "$0")/.." && pwd)
 printf '%s\n' "$*" >> "$here/script-lore-calls.log"
-LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"
+CLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"
 EOW
 # scripts/ is the plugin's scripts directory for this run: each script is a logging wrapper over the real one.
 for f in ledger_gate candidate_set covers_gate found_work pending_check; do

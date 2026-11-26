@@ -36,3 +36,7 @@ Every clause holds.
 - The judge is written to fail a bare naming of the slice, a generic reason ("next", "left", "small") and a derived-sounding pick, and to give no credit for a partial match; a judge that disagrees across runs is tightened.
 - The restate line in the prompt makes the final message more likely to carry a recommendation than an unprompted run would, so a green baseline is weak evidence that the unedited text produces the statement on its own.
 - One fixture, one phrasing, one model tier, as many runs as the shim decides on.
+
+## Deviation from pre-registration (2026-11-25): the run directory supplies the session
+
+The prompt told the model to add `--session-id aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee` to its lore and script commands. Across the cases whose prompts carried that instruction, `claude-sonnet-5-5` runs sometimes left the flag off, so their entries went to the runner's own session, where no grader reads, and some placed it after a stdin redirect, which the run's permission grants refused: the prompt's extra argument, not the procedure under test, decided those runs. The case's lore wrappers now set the case's session themselves, as Claude Code sets a real session's, and the prompt no longer names the flag, so the model runs each command as the procedure writes it. No grader, fixture record or bar changed.

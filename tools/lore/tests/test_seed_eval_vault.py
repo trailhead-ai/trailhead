@@ -926,6 +926,33 @@ def test_no_session_json_seeds_no_session(sandbox):
     assert seeded_lore(sandbox, "session", "show", "--session-id", SESSION_ID, "--json").returncode != 0
 
 
+RUNNER_SESSION_ID = "12345678-1234-4123-8123-123456789abc"
+
+
+@pytest.mark.parametrize(
+    "declared,lands_in",
+    [
+        (SESSION_ID, SESSION_ID),
+        ("11111111-2222-4333-8444-555555555555", "11111111-2222-4333-8444-555555555555"),
+        (None, SESSION_ID),
+    ],
+    ids=["seeded-default-id", "seeded-other-id", "no-session-json"],
+)
+def test_wrapper_logs_to_the_case_session_not_the_runners(sandbox, declared, lands_in):
+    if declared is not None:
+        write_session(sandbox, {**SESSION, "session_id": declared})
+    assert seed(sandbox, [ADR]).returncode == 0
+
+    logged = seeded_lore(
+        sandbox, "session", "candidate", "--kind", "lesson", "--phase", "Build",
+        stdin="Logged with no session flag.\n",
+        env=clean_env(sandbox, CLAUDE_CODE_SESSION_ID=RUNNER_SESSION_ID),
+    )
+
+    assert logged.returncode == 0, logged.stderr
+    assert "Logged with no session flag." in session_show(sandbox, lands_in)["body"]
+
+
 @pytest.mark.parametrize(
     "session,named",
     [

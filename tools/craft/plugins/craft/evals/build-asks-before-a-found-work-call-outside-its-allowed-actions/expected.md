@@ -37,3 +37,7 @@ The earlier fixture's finding 2 said another spec's worked-example row was wrong
 ## Limitations
 
 As the cannot-be-undone case: no executor, no git, a deleted trace, one fixture, one phrasing, one model tier. The `tool_used` pattern is scoped to `task/csv-schema-migration` so the session's own legitimate record writes never match it.
+
+## Deviation from pre-registration (2026-11-25): the run directory supplies the session
+
+The prompt told the model to add `--session-id aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee` to its lore and script commands. Across the cases whose prompts carried that instruction, `claude-sonnet-5-5` runs sometimes left the flag off, so their entries went to the runner's own session, where no grader reads, and some placed it after a stdin redirect, which the run's permission grants refused: the prompt's extra argument, not the procedure under test, decided those runs. The case's lore wrappers now set the case's session themselves, as Claude Code sets a real session's, and the prompt no longer names the flag, so the model runs each command as the procedure writes it. No grader, fixture record or bar changed.

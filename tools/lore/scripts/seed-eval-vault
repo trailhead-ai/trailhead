@@ -23,13 +23,18 @@ file. In the current working directory the script:
    wrapper puts the copy on ``PYTHONPATH``, defaults ``LORE_EMAIL`` to the identity
    resolved at seed time (a sandbox that cannot execute ``git`` cannot look it up
    itself), and execs this checkout's lore CLI under the symlink-resolved
-   interpreter that ran this script.
+   interpreter that ran this script. It also sets ``CLAUDE_CODE_SESSION_ID`` to the
+   case's session, whatever the caller's environment holds: in an eval run that
+   variable names the runner's own session, which no grader can know, so a lore call
+   made with no ``--session-id`` lands in the case's session, as a real session's
+   calls land in that session.
 
 A ``session.json`` beside ``records.json`` seeds a dirty session as well. It is a
 JSON object ``{"session_id": "<guid>", "candidates": [{kind, phase, body}, ...]}``;
 after the records, each candidate is captured through ``lore session candidate
 --session-id <guid>``, so the session record is the CLI's own and a run reads it
-back with the same ``--session-id``. Without that file no session is seeded.
+back with the same ``--session-id``. Without that file no session is seeded, and the
+wrapper's session is ``EVAL_SESSION_ID``.
 
 Nothing is written unless every refusal check passes, and every record's status is
 checked against its kind's vocabulary up front. It refuses (stderr
@@ -60,6 +65,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 LORE_CLI = REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
 IDENTITY_NAME = "Eval Fixture"
 IDENTITY_EMAIL = "eval@example.invalid"
+EVAL_SESSION_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 SAFE_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")
 FIELDS = ("kind", "title", "status", "body")
 OPTIONAL_FIELDS = ("related",)
@@ -254,6 +260,7 @@ def run_lore(python: str, *args: str, stdin: str | None = None) -> None:
 WRAPPER = """#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
 LORE_EMAIL="${{LORE_EMAIL:-{email}}}"; export LORE_EMAIL
+CLAUDE_CODE_SESSION_ID={session_id}; export CLAUDE_CODE_SESSION_ID
 PYTHONPATH="$here" exec {python} {cli} "$@"
 """
 
@@ -269,12 +276,15 @@ def copy_tracked_trailhead(cwd: Path, tracked: list[Path]) -> None:
         target.chmod(source.stat().st_mode & 0o777)
 
 
-def write_wrapper(cwd: Path, python: str, email: str, tracked: list[Path]) -> None:
+def write_wrapper(cwd: Path, python: str, email: str, session_id: str, tracked: list[Path]) -> None:
     if not SAFE_EMAIL.fullmatch(email):
         raise Refusal(f"the global git user.email {email!r} is unset or unsafe to bake into the lore wrapper")
     wrapper = cwd / "lore"
     wrapper.write_text(
-        WRAPPER.format(python=shlex.quote(python), cli=shlex.quote(str(LORE_CLI)), email=email),
+        WRAPPER.format(
+            python=shlex.quote(python), cli=shlex.quote(str(LORE_CLI)), email=email,
+            session_id=shlex.quote(session_id),
+        ),
         encoding="utf-8",
     )
     wrapper.chmod(0o755)
@@ -304,7 +314,8 @@ def seed(records_path: Path) -> None:
             *related,
             stdin=record["body"],
         )
-    write_wrapper(cwd, python, global_email(), tracked)
+    session_id = session["session_id"] if session else EVAL_SESSION_ID
+    write_wrapper(cwd, python, global_email(), session_id, tracked)
     if session:
         for candidate in session["candidates"]:
             run_lore(
