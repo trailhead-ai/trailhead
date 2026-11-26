@@ -22,12 +22,17 @@ CLOSING_PREFIX = "deselected tiers: "
 
 GATEWAY = "gateway-e2e"
 GATEWAY_NOTE = f" ({GATEWAY}: TRAILHEAD_GATEWAY_E2E=1, from a host terminal)"
-ALL_NAMES = f"{', '.join(TIERS)}, {GATEWAY}"
-CLOSING = f"{CLOSING_PREFIX}{ALL_NAMES} — run them with .venv/bin/python -m pytest {ALL_TIERS_COMMAND}{GATEWAY_NOTE}"
+REAL_OUTPOST = "real-outpost"
+REAL_OUTPOST_NOTE = f" ({REAL_OUTPOST}: TRAILHEAD_REAL_OUTPOST=1, needs the sibling Outpost checkout)"
+ALL_NAMES = f"{', '.join(TIERS)}, {GATEWAY}, {REAL_OUTPOST}"
+CLOSING = (
+    f"{CLOSING_PREFIX}{ALL_NAMES} — run them with .venv/bin/python -m pytest "
+    f"{ALL_TIERS_COMMAND}{GATEWAY_NOTE}{REAL_OUTPOST_NOTE}"
+)
 
 
 def _ungated_env():
-    return {k: v for k, v in os.environ.items() if k != "TRAILHEAD_GATEWAY_E2E"}
+    return {k: v for k, v in os.environ.items() if k not in ("TRAILHEAD_GATEWAY_E2E", "TRAILHEAD_REAL_OUTPOST")}
 
 
 def _pytest(*args, cwd=REPO, env=None):
@@ -95,12 +100,19 @@ def test_a_default_run_ends_by_naming_each_deselected_tier_and_the_all_tiers_com
 def test_the_all_tiers_command_still_names_the_gateway_gate_until_it_is_set():
     result = _pytest("--collect-only", "-q", "-m", "not benchmark", "trailhead/tests/test_paths.py")
     last = [line for line in result.stdout.splitlines() if line.strip()][-1]
-    assert last.startswith(f"{CLOSING_PREFIX}{GATEWAY} ")
+    assert last.startswith(f"{CLOSING_PREFIX}{GATEWAY}, {REAL_OUTPOST} ")
     assert "chromium" not in last and "seam_real" not in last
 
 
 def test_the_all_tiers_command_with_the_gateway_gate_set_ends_without_the_closing_line():
     env = {**_ungated_env(), "TRAILHEAD_GATEWAY_E2E": "1"}
+    result = _pytest("--collect-only", "-q", "-m", "not benchmark", "trailhead/tests/test_paths.py", env=env)
+    assert f"{CLOSING_PREFIX}{REAL_OUTPOST} " in result.stdout
+    assert GATEWAY not in result.stdout.split(CLOSING_PREFIX)[-1].split(" — ")[0]
+
+
+def test_the_all_tiers_command_with_both_gates_set_ends_without_the_closing_line():
+    env = {**_ungated_env(), "TRAILHEAD_GATEWAY_E2E": "1", "TRAILHEAD_REAL_OUTPOST": "1"}
     result = _pytest("--collect-only", "-q", "-m", "not benchmark", "trailhead/tests/test_paths.py", env=env)
     assert CLOSING_PREFIX not in result.stdout
 
@@ -109,7 +121,7 @@ def test_the_closing_line_names_only_the_tiers_still_deselected():
     result = _pytest(
         "--collect-only", "-q", "-m", "not benchmark and not seam_real", "trailhead/tests/test_paths.py"
     )
-    assert f"{CLOSING_PREFIX}seam_real, {GATEWAY} " in result.stdout
+    assert f"{CLOSING_PREFIX}seam_real, {GATEWAY}, {REAL_OUTPOST} " in result.stdout
     assert "chromium" not in result.stdout.split(CLOSING_PREFIX)[-1]
 
 

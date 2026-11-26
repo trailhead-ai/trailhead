@@ -1,10 +1,11 @@
 """`trailhead outpost open` against the real Outpost that predates the one-time sign-in code.
 
-Opt-in tier (``seam_real``): the Outpost under test is a checkout of the release before the sign-in code route
+Opt-in tier (``seam_real``, plus ``TRAILHEAD_REAL_OUTPOST=1`` for the Outpost checkout):
+the Outpost under test is a checkout of the release before the sign-in code route
 existed (``OLD_OUTPOST_REV`` in the ``../outpost`` repository), added as a temporary worktree with the current
 checkout's ``node_modules`` linked in, started on a free port with a temp state directory.
 
-    .venv/bin/python -m pytest -m seam_real -n 0 trailhead/tests/test_outpost_open_real_outpost.py
+    TRAILHEAD_REAL_OUTPOST=1 .venv/bin/python -m pytest trailhead/tests/test_outpost_open_real_outpost.py
 """
 
 from __future__ import annotations

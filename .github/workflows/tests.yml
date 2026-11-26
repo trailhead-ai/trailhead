@@ -179,7 +179,7 @@ jobs:
             budget: 130
           - tier: seam_real
             workers: auto
-            baseline: 312
+            baseline: 329
             max_skipped: 0
             budget: 120
     steps:

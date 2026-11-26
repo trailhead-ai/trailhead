@@ -1,11 +1,12 @@
 """`outpost-gateway` against a real Outpost: on-demand registration and the reason codes Outpost refuses with.
 
-Opt-in tier (``seam_real``): each test starts a real Outpost (``node --import tsx server/index.ts``) on a
+Opt-in tier (``seam_real``, plus ``TRAILHEAD_REAL_OUTPOST=1`` for the Outpost checkout):
+each test starts a real Outpost (``node --import tsx server/index.ts``) on a
 free port with a temp state directory and a temp camp layout, and runs the real gateway command as a child of
 a fake harness. The refusal messages are read from the Outpost checkout's shared fixture
 (``tests/fixtures/refusal-reasons.json``), so the wording asserted here is the wording Outpost sends.
 
-    .venv/bin/python -m pytest -m seam_real trailhead/tests/test_gateway_command_real_outpost.py
+    TRAILHEAD_REAL_OUTPOST=1 .venv/bin/python -m pytest trailhead/tests/test_gateway_command_real_outpost.py
 """
 
 from __future__ import annotations
