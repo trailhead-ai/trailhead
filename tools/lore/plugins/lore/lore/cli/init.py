@@ -104,16 +104,6 @@ _GUARD_EXEMPT_DELIM = "\n"
 _SITES_DIR = "sites"
 _OUTPOST_DIR = "outpost"
 
-#: The files lore scaffolds at a vault ROOT. Earlier installs wrote a literal
-#: deny rule for each; `lore init` now removes those rules by name.
-_VAULT_ROOT_FILES = (".gitignore", ".lore.lock")
-
-#: Non-record subtrees of a vault that earlier installs wrote a deny rule for;
-#: `lore init` now removes that rule. The runtime hook is what keeps hand edits
-#: out of them.
-_VAULT_DENIED_TREES = (".git",)
-
-
 def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     """Install the vault write-protection guardrail into *settings_path*.
 
@@ -178,22 +168,15 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     )
 
     vaults_prefix = f"//{str(vaults_root).lstrip('/')}"
-    blanket_glob = f"{vaults_prefix}/**"
-    settings_writer_mod.remove_permission_deny(settings_path, f"Write({blanket_glob})")
-    settings_writer_mod.remove_permission_deny(settings_path, f"Edit({blanket_glob})")
-
-    for kind in sorted(KINDS):
-        settings_writer_mod.remove_permission_deny(
-            settings_path, f"Edit({vaults_prefix}/*/{kind}/**)"
-        )
-    for tree in _VAULT_DENIED_TREES:
-        settings_writer_mod.remove_permission_deny(
-            settings_path, f"Edit({vaults_prefix}/*/{tree}/**)"
-        )
-    for name in _VAULT_ROOT_FILES:
-        settings_writer_mod.remove_permission_deny(
-            settings_path, f"Edit({vaults_prefix}/*/{name})"
-        )
+    vault_deny_rules = [
+        f"Write({vaults_prefix}/**)",
+        f"Edit({vaults_prefix}/**)",
+        *(f"Edit({vaults_prefix}/*/{kind}/**)" for kind in sorted(KINDS)),
+        f"Edit({vaults_prefix}/*/.git/**)",
+        *(f"Edit({vaults_prefix}/*/{name})" for name in (".gitignore", ".lore.lock")),
+    ]
+    for rule in vault_deny_rules:
+        settings_writer_mod.remove_permission_deny(settings_path, rule)
 
     settings_writer_mod.upsert_permission_allow(settings_path, "Bash(lore:*)")
 
