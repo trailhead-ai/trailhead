@@ -431,11 +431,13 @@ def run_claude_session(
     read_paths: dict[str, str] | None = None,
     extra_path: Path | None = None,
     during: Callable[[], None] | None = None,
+    before: Callable[[], None] | None = None,
 ) -> Session:
     """One real ``claude -p`` session in *cwd*, its Bash sandboxed by *settings*; waits for the process to exit.
 
     *read_paths* adds Read-tool calls after the Bash steps. *extra_path* goes first on the session's PATH
-    (a directory a session could have put a script in). *during* runs on a thread beside the session.
+    (a directory a session could have put a script in). *during* runs on a thread beside the session; *before*
+    runs once, after the session's command is built and before the process starts.
     """
     if shutil.which("claude") is None:
         raise AssertionError("claude is not on PATH")
@@ -460,6 +462,8 @@ def run_claude_session(
     stream = root / f"session-{label}.jsonl"
     front = os.pathsep.join(str(p) for p in (extra_path, shim_bin) if p is not None)
     session_env = {**env, "PATH": f"{front}{os.pathsep}{env['PATH']}"}
+    if before is not None:
+        before()
     helper = threading.Thread(target=during, daemon=True) if during is not None else None
     if helper is not None:
         helper.start()
@@ -504,6 +508,11 @@ def check_hook_registered_the_session_for_w1(facts: Facts, session: Session) -> 
     key, mode = facts.credentials[0]
     assert mode == 0o600, f"credential file mode is {oct(mode)}, expected 0o600"
     assert facts.registry == [(key, f"{GROUP}/{W1}")], f"registered {facts.registry}, expected {GROUP}/{W1}"
+
+
+def check_nothing_is_registered_before_the_first_gateway_call(facts: Facts) -> None:
+    assert not facts.credentials, f"a credential file exists before any gateway call: {facts.credentials}"
+    assert not facts.registry, f"the registry holds a session before any gateway call: {facts.registry}"
 
 
 def check_credential_file_read_is_refused(facts: Facts, session: Session) -> None:  # AC22

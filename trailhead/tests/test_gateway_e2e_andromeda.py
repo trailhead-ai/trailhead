@@ -102,6 +102,7 @@ from ._gateway_e2e_support import (
     W1,
     W2,
     Facts,
+    check_nothing_is_registered_before_the_first_gateway_call,
     check_credential_file_read_is_refused,
     check_hook_registered_the_session_for_w1,
     check_run_list_prints_the_empty_list,
@@ -212,8 +213,16 @@ def bystander():
     server.server_close()
 
 
-def _session(tmp_path_factory, bystander, label, *, cwd="w1", deny_read=True, with_hook=True):
-    """One real sandboxed session against its own fresh Outpost: ``(Facts, Session)``."""
+def _facts(outpost):
+    files = outpost.credential_files()
+    return Facts([(f.parent.name, stat.S_IMODE(f.stat().st_mode)) for f in files], outpost.registry_workspaces())
+
+
+def _session(tmp_path_factory, bystander, label, *, cwd="w1", deny_read=True, with_hook=True, before_facts=None):
+    """One real sandboxed session against its own fresh Outpost: ``(Facts, Session)``.
+
+    When *before_facts* is a list, the Outpost's state just before the session starts is appended to it.
+    """
     root = tmp_path_factory.mktemp(label)
     camp = make_camp(root)
     with real_outpost(root, camp) as outpost:
@@ -232,9 +241,9 @@ def _session(tmp_path_factory, bystander, label, *, cwd="w1", deny_read=True, wi
             env=env,
             shim_bin=shim_bin,
             with_hook=with_hook,
+            before=(lambda: before_facts.append(_facts(outpost))) if before_facts is not None else None,
         )
-        files = outpost.credential_files()
-        facts = Facts([(f.parent.name, stat.S_IMODE(f.stat().st_mode)) for f in files], outpost.registry_workspaces())
+        facts = _facts(outpost)
     return facts, session
 
 
@@ -269,7 +278,10 @@ def test_without_denyread_the_credential_read_succeeds_and_the_refusal_check_fai
 
 
 def test_without_the_hook_the_first_gateway_call_registers_w1_and_lists_an_empty_run_list(tmp_path_factory, bystander):
-    facts, session = _session(tmp_path_factory, bystander, "no-hook", with_hook=False)
+    before = []
+    facts, session = _session(tmp_path_factory, bystander, "no-hook", with_hook=False, before_facts=before)
+    [before_the_session] = before
+    check_nothing_is_registered_before_the_first_gateway_call(before_the_session)
     _ran(session, "run_list")
     check_hook_registered_the_session_for_w1(facts, session)
     check_run_list_prints_the_empty_list(facts, session)

@@ -25,10 +25,12 @@ from ._gateway_e2e_support import (
     READ_CONTROL,
     READ_CONTROL_TEXT,
     DenialFacts,
+    Facts,
     LateFileActor,
     RealOutpost,
     Session,
     check_a_shadowed_gateway_cannot_read_the_credential,
+    check_nothing_is_registered_before_the_first_gateway_call,
     check_the_auth_header_helper_prints_no_token,
     check_the_launched_session_reaches_its_own_workspace_runs,
     check_no_cookie_is_handed_to_a_page_request,
@@ -404,3 +406,20 @@ def test_the_launched_session_settings_let_the_ritual_run_the_pinned_gateway_shi
     denied = settings["permissions"]["deny"]
     assert f"Bash({shim})" not in denied and f"Bash({shim} *)" not in denied
     assert {f"Bash({header})", f"Bash({header} *)"} <= set(denied)
+
+
+@pytest.mark.parametrize(
+    "facts, says",
+    [
+        (Facts([("ws-1", 0o600)], []), "credential"),
+        (Facts([], [("ws-1", f"{GROUP}/{W1}")]), "registry"),
+    ],
+    ids=["a-credential-file", "a-registry-entry"],
+)
+def test_the_before_the_first_call_check_fails_when_anything_is_registered(facts, says):
+    with pytest.raises(AssertionError, match=says):
+        check_nothing_is_registered_before_the_first_gateway_call(facts)
+
+
+def test_the_before_the_first_call_check_passes_when_nothing_is_registered():
+    check_nothing_is_registered_before_the_first_gateway_call(Facts([], []))
