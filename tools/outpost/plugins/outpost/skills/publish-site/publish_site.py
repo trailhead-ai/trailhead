@@ -82,6 +82,7 @@ nothing scans.
 from __future__ import annotations
 
 import argparse
+import errno
 import fcntl
 import http.client
 import json
@@ -452,6 +453,52 @@ def _lock_path_for(ws_dir: Path) -> Path:
     return ws_dir.parent / ".locks" / f"{ws_dir.name}.lock"
 
 
+def _ensure_locks_dir(locks_dir: Path) -> None:
+    """Mirror of ``camp.group.manifest.ensure_locks_dir``: the lock folder must be
+    a real directory (created 0o700 when missing); anything else is refused."""
+    try:
+        st = os.lstat(locks_dir)
+    except FileNotFoundError:
+        locks_dir.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.mkdir(locks_dir, 0o700)
+        except FileExistsError:
+            pass
+        st = os.lstat(locks_dir)
+    if not stat.S_ISDIR(st.st_mode):
+        kind = "a symlink" if stat.S_ISLNK(st.st_mode) else "not a directory"
+        raise PublishError(
+            f"camp lock folder {locks_dir} is {kind}, not a real directory — "
+            f"delete {locks_dir} and retry (camp recreates it)"
+        )
+
+
+def _open_lock_file(lock_path: Path):
+    """Mirror of ``camp.group.manifest.open_lock_file``: open the lockfile without
+    following a symlink and without truncating it."""
+    _ensure_locks_dir(lock_path.parent)
+    try:
+        fd = os.open(
+            str(lock_path),
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+        )
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise PublishError(
+                f"camp lock file {lock_path} is a symlink — refusing to open it; "
+                f"delete {lock_path} and retry"
+            ) from exc
+        raise
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise PublishError(
+            f"camp lock file {lock_path} is not a regular file — "
+            f"delete {lock_path} and retry"
+        )
+    return os.fdopen(fd, "r+")
+
+
 @contextmanager
 def _workspace_lock(ws_dir: Path):
     """Acquire camp's own per-slug lock guarding writes into *ws_dir*.
@@ -464,9 +511,8 @@ def _workspace_lock(ws_dir: Path):
     file at ``lock_path`` and retried on the current file if they differ.
     """
     lock_path = _lock_path_for(ws_dir)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
-        lock_fd = open(str(lock_path), "w")
+        lock_fd = _open_lock_file(lock_path)
         try:
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
             try:

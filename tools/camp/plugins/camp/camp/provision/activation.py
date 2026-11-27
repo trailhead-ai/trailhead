@@ -147,8 +147,9 @@ def _try_acquire_member_guard(ws_dir: Path, member_name: str):
     can never be handed the "same" lock on a different inode).
     """
     lock_path = member_guard_lock_path(ws_dir, member_name)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fd = open(str(lock_path), "w")
+    from ..group.manifest import open_lock_file
+
+    fd = open_lock_file(lock_path)
     try:
         fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:

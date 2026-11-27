@@ -1935,3 +1935,63 @@ def test_vault_publish_prints_the_same_link_with_or_without_identity(tmp_path):
     assert _url_lines(with_identity.stdout) == [f"http://127.0.0.1:{outpost.port}/acme/docs/"]
     assert with_identity.stdout == without.stdout
     assert outpost.paths == []
+
+
+def test_a_symlinked_lock_file_is_refused_and_its_target_left_untouched(tmp_path):
+    mod = _load_module()
+    ws = _make_workspace(tmp_path / "camp-state")
+    target = tmp_path / "victim.txt"
+    target.write_text("precious")
+    lock_path = mod._lock_path_for(ws)
+    lock_path.parent.mkdir()
+    lock_path.symlink_to(target)
+
+    with pytest.raises(mod.PublishError, match="symlink"):
+        with mod._workspace_lock(ws):
+            pytest.fail("lock was acquired through a symlink")
+
+    assert target.read_text() == "precious"
+
+
+def test_acquiring_an_existing_lock_file_does_not_truncate_it(tmp_path):
+    mod = _load_module()
+    ws = _make_workspace(tmp_path / "camp-state")
+    lock_path = mod._lock_path_for(ws)
+    lock_path.parent.mkdir()
+    lock_path.write_text("keep")
+
+    with mod._workspace_lock(ws):
+        pass
+
+    assert lock_path.read_text() == "keep"
+
+
+@pytest.mark.parametrize("shape", ["file", "symlink-to-dir", "dangling-symlink"])
+def test_a_lock_folder_that_is_not_a_real_directory_is_refused(tmp_path, shape):
+    mod = _load_module()
+    ws = _make_workspace(tmp_path / "camp-state")
+    locks = ws.parent / ".locks"
+    if shape == "file":
+        locks.write_text("x")
+    elif shape == "symlink-to-dir":
+        (tmp_path / "elsewhere").mkdir()
+        locks.symlink_to(tmp_path / "elsewhere")
+    else:
+        locks.symlink_to(tmp_path / "nowhere")
+
+    with pytest.raises(mod.PublishError, match="delete") as excinfo:
+        with mod._workspace_lock(ws):
+            pytest.fail("lock was acquired in a lock folder that is not a directory")
+
+    assert str(locks) in str(excinfo.value)
+    assert not (tmp_path / "elsewhere" / "feat-x.lock").exists()
+
+
+def test_a_missing_lock_folder_is_created_private(tmp_path):
+    mod = _load_module()
+    ws = _make_workspace(tmp_path / "camp-state")
+
+    with mod._workspace_lock(ws):
+        pass
+
+    assert (ws.parent / ".locks").stat().st_mode & 0o777 == 0o700

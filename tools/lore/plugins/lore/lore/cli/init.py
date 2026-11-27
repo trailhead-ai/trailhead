@@ -124,7 +124,10 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
          ``Edit(path)`` deny into a write deny for its Bash sandbox, and a deny
          beats ``sandbox.filesystem.allowWrite``, so a rule over a vault's
          ``.lore.lock`` or ``session/`` tree breaks every ``lore`` write in a
-         sandboxed session. The hook above is the vault's write protection.
+         sandboxed session. The hook above guards the harness's file-edit tools
+         only; a Bash-mediated write to a vault is not mechanically blocked,
+         apart from the hub-session ``.git/config``, ``.git/hooks`` and
+         ``.git/info`` sandbox denies the Claude Code harness installs.
          Every rule an earlier install generated (the two blanket rules, one
          rule per record kind, the vault ``.git`` tree and the vault-root
          files) is removed, so a re-run repairs an existing settings file;
@@ -185,7 +188,8 @@ def cmd_init(args) -> int:
     """Non-interactive, idempotent, user-level lore installer.
 
     Bootstraps the canonical default vault and global index location so the
-    machine is lore-ready, installs the vault write-protection guardrail, and
+    machine is lore-ready, installs the file-edit-tool vault guard hook (it does not
+    stop Bash-mediated vault writes; see the settings step above), and
     installs lore's user-level ruleset into every detected harness via the
     trailhead ``Harness`` seam. No ``input()`` prompts — safe to call from scripts
     and ``trailhead install``. There is no ``--local`` mode: the ruleset is a

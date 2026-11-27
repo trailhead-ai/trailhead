@@ -3,9 +3,12 @@
 
 Claude Code invokes this hook before every file-mutating tool call (matcher
 ``Edit|Write|MultiEdit|NotebookEdit``). It reads the PreToolUse JSON payload from
-stdin, resolves the write target and the guarded vault root(s) to their REAL paths
-via ``os.path.realpath`` (symlink-transparent), and **denies** the tool call when
-the real target is at or under any real vault root.
+stdin, resolves the guarded vault root(s) to their REAL paths via
+``os.path.realpath`` (symlink-transparent), and **denies** the tool call when ANY
+form of the write target — the lexically normalized ``~``-expanded absolute path, or
+its realpath — is at or under a real vault root and not in an exempt zone. A target
+the guard cannot resolve (a NUL byte, a non-string path, any resolution error) is
+refused with exit 2, never a traceback.
 
 The write target is read from ``tool_input.file_path`` (Edit/Write/MultiEdit) OR
 ``tool_input.notebook_path`` (NotebookEdit), whichever is present — the guard
@@ -86,8 +89,9 @@ time — they carry no ``file_path`` and Bash is not in the matcher — so they 
 NOT covered by this runtime hook. They are covered only by the agent-rules
 prohibition.
 
-Fail-open posture: a malformed stdin payload or any unexpected error allows the
-tool call (exit 0) rather than blocking every covered call in the session. The
+Fail-open posture: a malformed stdin payload allows the tool call (exit 0) rather
+than blocking every covered call in the session; a payload that parses but carries a
+path the guard cannot judge is refused (exit 2). The
 guard's job is to protect the vault, not to become a single point of failure that
 bricks the editor; the vault subtree is the narrow, well-defined target and a
 parse failure means we cannot identify the target anyway.
@@ -217,6 +221,28 @@ def _is_exempt(real_target: str, real_roots: list[str]) -> bool:
     return False
 
 
+def _path_forms(path: str) -> list[str]:
+    """Every form a write to *path* could land on, casefolded.
+
+    The lexical form (`~` expanded, made absolute, `..` collapsed textually) is
+    where a harness that normalizes before writing lands; the realpath of the
+    expanded path is where the kernel lands. A guard that only judged the second
+    could be steered by a `..` that the first collapses differently.
+    """
+    expanded = os.path.expanduser(path)
+    lexical = os.path.normpath(os.path.abspath(expanded)).casefold()
+    return [lexical, os.path.realpath(expanded).casefold()]
+
+
+def _refuse_unjudgeable(reason: str) -> int:
+    print(
+        f"lore vault guard: refusing — cannot judge the write target ({reason}); "
+        "a path the guard cannot resolve is treated as inside the vault.",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -228,18 +254,29 @@ def main() -> int:
         return 0
 
     tool_input = payload.get("tool_input") or {}
-    if isinstance(tool_input, dict):
-        # Edit/Write/MultiEdit use file_path; NotebookEdit uses notebook_path.
-        file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
-    else:
-        file_path = ""
-    if not file_path:
+    if not isinstance(tool_input, dict):
+        return 0
+
+    # Edit/Write/MultiEdit use file_path; NotebookEdit uses notebook_path. Every
+    # key that is present is judged, so no covered tool can slip a path past it.
+    paths: list[str] = []
+    for key in ("file_path", "notebook_path"):
+        value = tool_input.get(key)
+        if value is None or value == "":
+            continue
+        if not isinstance(value, str):
+            return _refuse_unjudgeable(f"{key} is a {type(value).__name__}, not a string")
+        paths.append(value)
+    if not paths:
         # A covered tool with a malformed/unexpected payload carrying no path —
         # we cannot identify a target, so fail open (Bash never reaches here: it
         # is not in the matcher).
         return 0
 
-    real_target = _real(file_path)
+    try:
+        target_forms = [(p, form) for p in paths for form in _path_forms(p)]
+    except Exception as exc:  # noqa: BLE001 — fail closed on anything unresolvable
+        return _refuse_unjudgeable(f"{type(exc).__name__}: {exc}")
 
     roots_env = os.environ.get("LORE_VAULT_GUARD_ROOT", "")
     roots = [r for r in roots_env.split(_ROOT_DELIM) if r]
@@ -251,26 +288,31 @@ def main() -> int:
         )
         return 0
 
-    real_roots = [_real(r) for r in roots]
-
-    for raw_root, real_root in zip(roots, real_roots):
-        if _is_under(real_target, real_root):
-            # Exemptions are consulted only here, inside a root match: a target
-            # no root covers was already allowed and never gets this far. The
-            # full root list goes along, because an exemption may be anchored at
-            # a root other than the one that matched (the vaults root covers a
-            # write that arrived through the `default` symlink root).
-            if _is_exempt(real_target, real_roots):
-                return 0
-            print(
-                "lore vault guard: refusing to write to "
-                f"{file_path!r} (resolved: {real_target!r}) — it is inside the "
-                f"lore vault at {raw_root!r} (resolved: {real_root!r}). The vault "
-                "is CLI-managed; use `lore` commands to write records, never a "
-                "direct file edit.",
-                file=sys.stderr,
-            )
-            return 2  # Deny: exit 2 blocks the tool call.
+    try:
+        real_roots = [_real(r) for r in roots]
+        for file_path, form in target_forms:
+            for raw_root, real_root in zip(roots, real_roots):
+                if not _is_under(form, real_root):
+                    continue
+                # Exemptions are consulted only inside a root match. A form that
+                # is under a root and not exempt refuses the write whatever the
+                # other forms say; the full root list goes along because an
+                # exemption may be anchored at a root other than the one that
+                # matched (the vaults root covers a write that arrived through
+                # the `default` symlink root).
+                if _is_exempt(form, real_roots):
+                    break
+                print(
+                    "lore vault guard: refusing to write to "
+                    f"{file_path!r} (resolved: {form!r}) — it is inside the "
+                    f"lore vault at {raw_root!r} (resolved: {real_root!r}). The vault "
+                    "is CLI-managed; use `lore` commands to write records, never a "
+                    "direct file edit.",
+                    file=sys.stderr,
+                )
+                return 2  # Deny: exit 2 blocks the tool call.
+    except Exception as exc:  # noqa: BLE001 — fail closed on anything unresolvable
+        return _refuse_unjudgeable(f"{type(exc).__name__}: {exc}")
 
     return 0  # Allow.
 

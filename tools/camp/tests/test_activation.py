@@ -2262,3 +2262,55 @@ def test_reaping_member_guards_removes_only_the_named_members_locks(tmp_path: Pa
     activation.reap_member_guard_unlocked(ws_dir, ["repo_a"])
 
     assert sorted(p.name for p in (worktrees / ".locks").iterdir()) == ["feat-x.repo_b.activate.lock"]
+
+
+def test_a_symlinked_member_guard_lock_is_refused_and_its_target_left_untouched(tmp_path: Path) -> None:
+    import pytest
+
+    import camp.provision.activation as activation
+    from camp.group.manifest import LockPathError
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    target = tmp_path / "victim.txt"
+    target.write_text("precious")
+    locks = worktrees / ".locks"
+    locks.mkdir()
+    (locks / "feat-x.repo_a.activate.lock").symlink_to(target)
+
+    with pytest.raises(LockPathError, match="symlink"):
+        activation._try_acquire_member_guard(ws_dir, "repo_a")
+
+    assert target.read_text() == "precious"
+
+
+def test_a_member_guard_lock_folder_that_is_a_file_is_refused(tmp_path: Path) -> None:
+    import pytest
+
+    import camp.provision.activation as activation
+    from camp.group.manifest import LockPathError
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    (worktrees / ".locks").write_text("x")
+
+    with pytest.raises(LockPathError, match="delete"):
+        activation._try_acquire_member_guard(ws_dir, "repo_a")
+
+
+def test_acquiring_an_existing_member_guard_lock_does_not_truncate_it(tmp_path: Path) -> None:
+    import camp.provision.activation as activation
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    lock = worktrees / ".locks" / "feat-x.repo_a.activate.lock"
+    lock.parent.mkdir()
+    lock.write_text("keep")
+
+    fd = activation._try_acquire_member_guard(ws_dir, "repo_a")
+    activation._release_member_guard(fd)
+
+    assert lock.read_text() == "keep"

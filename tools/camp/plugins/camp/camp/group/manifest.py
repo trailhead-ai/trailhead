@@ -66,9 +66,11 @@ Schema (v1):
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import json
 import os
+import stat
 import sys
 import tempfile
 import time
@@ -82,6 +84,12 @@ class ManifestError(Exception):
 
     The message always includes the file path and the failing reason.
     """
+
+
+class LockPathError(ManifestError):
+    """Raised when a camp lock folder or lock file is not what camp created: the
+    folder is not a real directory, or the lock file is a symlink or not a regular
+    file. The message names the path and what to delete."""
 
 
 class LockTimeout(Exception):
@@ -268,6 +276,62 @@ def lock_path_for(ws_dir: Path) -> Path:
     return ws_dir.parent / LOCKS_DIRNAME / f"{ws_dir.name}.lock"
 
 
+def ensure_locks_dir(locks_dir: Path) -> None:
+    """Make sure *locks_dir* exists as a REAL directory (mode 0o700 when created).
+
+    Anything else at that path — a regular file, a symlink (dangling or not) — is
+    refused with a LockPathError naming what to delete, so a planted entry can
+    neither crash camp with a bare FileExistsError nor redirect its lockfiles.
+    """
+    locks_dir = Path(locks_dir)
+    try:
+        st = os.lstat(locks_dir)
+    except FileNotFoundError:
+        locks_dir.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.mkdir(locks_dir, 0o700)
+        except FileExistsError:
+            pass
+        st = os.lstat(locks_dir)
+    if not stat.S_ISDIR(st.st_mode):
+        kind = "a symlink" if stat.S_ISLNK(st.st_mode) else "not a directory"
+        raise LockPathError(
+            f"camp: lock folder {locks_dir} is {kind}, not a real directory — "
+            f"delete {locks_dir} and retry (camp recreates it)"
+        )
+
+
+def open_lock_file(lock_path: Path):
+    """Open (creating if missing) the lockfile at *lock_path* for flocking.
+
+    Never follows a symlink and never truncates: a planted symlink at the lock
+    path is refused with a LockPathError rather than opened. Returns a file
+    object (close-on-exec) positioned on the lock inode.
+    """
+    lock_path = Path(lock_path)
+    ensure_locks_dir(lock_path.parent)
+    try:
+        fd = os.open(
+            str(lock_path),
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+        )
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise LockPathError(
+                f"camp: lock file {lock_path} is a symlink — refusing to open it; "
+                f"delete {lock_path} and retry"
+            ) from exc
+        raise
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise LockPathError(
+            f"camp: lock file {lock_path} is not a regular file — "
+            f"delete {lock_path} and retry"
+        )
+    return os.fdopen(fd, "r+")
+
+
 def _acquire_flock(lock_fd, lock_path: Path, *, deadline: float | None) -> None:
     """Take the exclusive flock on *lock_fd*: unbounded when *deadline* is
     `None` (what the provisioner and every other manifest writer relies on),
@@ -318,10 +382,9 @@ def reconcile_lock(ws_dir: Path, *, timeout: float | None = None):
     caller's unbounded wait unchanged.
     """
     lock_path = lock_path_for(ws_dir)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
     deadline = None if timeout is None else time.monotonic() + timeout
     while True:
-        lock_fd = open(str(lock_path), "w")
+        lock_fd = open_lock_file(lock_path)
         try:
             _acquire_flock(lock_fd, lock_path, deadline=deadline)
             try:

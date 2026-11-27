@@ -1,6 +1,8 @@
-"""Tests for the vault write-protection guardrail.
+"""Tests for the vault file-edit guard.
 
-The guardrail is a path-canonicalizing PreToolUse hook (``hooks/vault-guard.py``)
+The guard guards the harness's file-edit tools only: Bash-mediated writes to a
+vault are not mechanically blocked, apart from the hub-session ``.git/config``,
+``.git/hooks`` and ``.git/info`` sandbox denies. It is a path-canonicalizing PreToolUse hook (``hooks/vault-guard.py``)
 that denies Write/Edit targeting paths under ``$XDG_STATE_HOME/lore/vaults/**``
 **and** the resolved real target of the ``default`` symlink. Symlink resolution
 happens at hook EXECUTION time, not install time, so a
@@ -72,7 +74,7 @@ GUARD_ROOT_DELIM = "\n"
 GUARD_EXEMPT_DELIM = "\n"
 
 
-def _run_guard(file_path, guard_roots, *, tool_name="Write", payload=None, exempt=None):
+def _run_guard(file_path, guard_roots, *, tool_name="Write", payload=None, exempt=None, env_extra=None, cwd=None):
     """Invoke the real guard hook with the given file_path, roots and exemptions.
 
     ``exempt=None`` removes ``LORE_VAULT_GUARD_EXEMPT`` from the child env
@@ -85,12 +87,15 @@ def _run_guard(file_path, guard_roots, *, tool_name="Write", payload=None, exemp
         env.pop("LORE_VAULT_GUARD_EXEMPT", None)
     else:
         env["LORE_VAULT_GUARD_EXEMPT"] = GUARD_EXEMPT_DELIM.join(str(p) for p in exempt)
+    if env_extra:
+        env.update(env_extra)
     return subprocess.run(
         [sys.executable, str(GUARD_SCRIPT)],
         input=payload if payload is not None else _make_payload(str(file_path), tool_name),
         capture_output=True,
         text=True,
         env=env,
+        cwd=cwd,
     )
 
 
@@ -329,6 +334,115 @@ class TestGuardHookSymlinkResolution:
 # ===========================================================================
 # 2b. Security-audit fixes (hardening)
 # ===========================================================================
+
+
+class TestGuardPathForms:
+    """The guard judges a path the way a write would land: a target is refused
+    when ANY of its forms (the lexically normalized, `~`-expanded absolute path,
+    and the realpath of that) sits in a protected part of a vault, and exempt only
+    when every form inside a vault is exempt."""
+
+    def _vaults(self, tmp_path):
+        vaults_root = tmp_path / "vaults"
+        vault = vaults_root / "default"
+        vault.mkdir(parents=True)
+        return vaults_root, vault
+
+    @pytest.mark.parametrize("protected", ["task/r.md", ".lore.lock", ".gitignore", ".git/config"])
+    def test_dotdot_through_a_sites_symlink_into_a_protected_path_is_denied(self, tmp_path, protected):
+        vaults_root, vault = self._vaults(tmp_path)
+        outside = tmp_path / "elsewhere" / "deep"
+        outside.mkdir(parents=True)
+        (vault / "sites").symlink_to(outside)
+        target = f"{vault}/sites/../{protected}"
+
+        result = _run_guard(target, [vaults_root], exempt=[f"{vaults_root}/*/sites"])
+
+        assert result.returncode == 2, result.stderr
+        assert "refusing to write" in result.stderr
+
+    def test_tilde_path_is_expanded_before_it_is_judged(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        record_dir = vault / "task"
+        record_dir.mkdir()
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+
+        result = _run_guard(
+            "~/r.md", [vaults_root], env_extra={"HOME": str(record_dir)}, cwd=cwd
+        )
+
+        assert result.returncode == 2, result.stderr
+
+    def test_tilde_path_into_sites_is_still_allowed(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        zone = vault / "sites" / "demo"
+        zone.mkdir(parents=True)
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+
+        result = _run_guard(
+            "~/index.html",
+            [vaults_root],
+            exempt=[f"{vaults_root}/*/sites"],
+            env_extra={"HOME": str(zone)},
+            cwd=cwd,
+        )
+
+        assert result.returncode == 0, result.stderr
+
+    def test_dotdot_that_stays_inside_sites_is_allowed(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        (vault / "sites" / "a").mkdir(parents=True)
+
+        result = _run_guard(
+            f"{vault}/sites/a/../b/index.html",
+            [vaults_root],
+            exempt=[f"{vaults_root}/*/sites"],
+        )
+
+        assert result.returncode == 0, result.stderr
+
+    def test_a_form_outside_every_vault_is_not_judged_protected(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        (vault / "sites").symlink_to(outside)
+
+        result = _run_guard(
+            f"{vault}/sites/page.html", [vaults_root], exempt=[f"{vaults_root}/*/sites"]
+        )
+
+        assert result.returncode == 0, result.stderr
+
+
+class TestGuardFailsClosedOnAnUnjudgeablePath:
+    """A path the guard cannot judge is refused (exit 2 with a stderr reason),
+    never a traceback (exit 1) and never a silent allow."""
+
+    @pytest.mark.parametrize(
+        "tool_input",
+        [
+            {"file_path": "/x/a\x00b"},
+            {"notebook_path": "/x/a\x00b"},
+            {"file_path": 5},
+            {"file_path": ["a"]},
+            {"file_path": {"a": 1}},
+            {"notebook_path": 7},
+            {"file_path": "/ok/path", "notebook_path": ["x"]},
+        ],
+        ids=["nul-file", "nul-notebook", "int", "list", "dict", "int-notebook", "bad-second-key"],
+    )
+    def test_refused_with_a_reason(self, tmp_path, tool_input):
+        vault = tmp_path / "vaults" / "default"
+        vault.mkdir(parents=True)
+        payload = json.dumps({"tool_name": "Write", "tool_input": tool_input})
+
+        result = _run_guard("", [vault.parent], payload=payload)
+
+        assert result.returncode == 2, (result.returncode, result.stderr)
+        assert "lore vault guard: refusing" in result.stderr
+        assert "Traceback" not in result.stderr
 
 
 class TestGuardToolCoverage:
