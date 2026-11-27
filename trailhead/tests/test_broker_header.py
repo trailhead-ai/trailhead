@@ -3,6 +3,7 @@
 import json
 import os
 import socket
+import socketserver
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,8 +12,15 @@ from urllib.parse import parse_qs
 
 import pytest
 
-from trailhead import broker_header, cli, outpost_lifecycle
+from trailhead import broker_header, cli
+from trailhead.gateway import outpost_http
 from trailhead.paths import state_dir
+from trailhead.tests._gateway_support import (
+    gateway_socket_path,
+    short_state_dir,
+    stale_socket,
+    tcp_squatter,
+)
 
 CONTRACT = json.loads((Path(__file__).parent / "fixtures" / "ranger-contract.json").read_text())
 SECRET = "s3cret-do-not-leak"
@@ -20,10 +28,20 @@ TOKEN = "tok-issued-123"
 CLIENT_ID = "client-abc"
 
 
-class _Stub:
-    """A loopback token endpoint whose answer is chosen per test."""
+class _UnixServer(ThreadingHTTPServer):
+    address_family = socket.AF_UNIX
+    daemon_threads = True
 
-    def __init__(self):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "outpost", 0
+
+
+class _Stub:
+    """A token endpoint on Outpost's gateway socket whose answer is chosen per test."""
+
+    def __init__(self, state):
+        self.state = state
         self.requests = []
         self.mode = "ok"
         stub = self
@@ -70,9 +88,9 @@ class _Stub:
                 elif stub.mode == "hang":
                     time.sleep(3)
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.server.daemon_threads = True
-        self.port = self.server.server_address[1]
+        folder = gateway_socket_path(state).parent
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.server = _UnixServer(str(gateway_socket_path(state)), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def close(self):
@@ -81,21 +99,25 @@ class _Stub:
 
 
 @pytest.fixture
-def stub(monkeypatch):
-    s = _Stub()
-    monkeypatch.setattr(outpost_lifecycle, "DAEMON_PORT", s.port)
+def state():
+    return short_state_dir()
+
+
+@pytest.fixture
+def stub(state):
+    s = _Stub(state)
     yield s
     s.close()
 
 
-def _fence(tmp_path):
+def _fence(tmp_path, state):
     root = tmp_path.resolve() / "fence"
     return {
         "HOME": str(root / "home"),
         "XDG_CONFIG_HOME": str(root / "config"),
         "XDG_STATE_HOME": str(root / "state"),
         "XDG_CACHE_HOME": str(root / "cache"),
-        "OUTPOST_STATE_DIR": str(root / "outpost-state"),
+        "OUTPOST_STATE_DIR": str(state),
         "PATH": os.environ.get("PATH", ""),
     }
 
@@ -123,8 +145,8 @@ def _failure_file(env, session):
     return state_dir("trailhead", env=env) / "broker-header" / f"{session}.failure"
 
 
-def test_a_200_prints_the_authorization_header_with_the_issued_token(tmp_path, monkeypatch, capsys, stub):
-    env = _fence(tmp_path)
+def test_a_200_prints_the_authorization_header_with_the_issued_token(tmp_path, monkeypatch, capsys, stub, state):
+    env = _fence(tmp_path, state)
     rc, out, err = _run(monkeypatch, capsys, env, _credential(tmp_path))
     assert rc == 0
     assert json.loads(out) == {"Authorization": f"Bearer {TOKEN}"}
@@ -137,8 +159,8 @@ def test_a_200_prints_the_authorization_header_with_the_issued_token(tmp_path, m
     assert not _failure_file(env, "sess-1").exists()
 
 
-def test_it_exchanges_from_a_directory_with_no_hub_configuration(tmp_path, monkeypatch, capsys, stub):
-    env = _fence(tmp_path)
+def test_it_exchanges_from_a_directory_with_no_hub_configuration(tmp_path, monkeypatch, capsys, stub, state):
+    env = _fence(tmp_path, state)
     bare = tmp_path / "bare-workspace"
     bare.mkdir()
     monkeypatch.chdir(bare)
@@ -160,10 +182,10 @@ FAILURES = [
 
 @pytest.mark.parametrize("mode,category", FAILURES)
 def test_a_bad_answer_fails_closed_with_a_secret_free_failure_line(
-    tmp_path, monkeypatch, capsys, stub, mode, category
+    tmp_path, monkeypatch, capsys, stub, mode, category, state,
 ):
     stub.mode = mode
-    env = _fence(tmp_path)
+    env = _fence(tmp_path, state)
     rc, out, err = _run(monkeypatch, capsys, env, _credential(tmp_path))
     assert rc != 0 and out == ""
     line = _failure_file(env, "sess-1").read_text()
@@ -174,50 +196,71 @@ def test_a_bad_answer_fails_closed_with_a_secret_free_failure_line(
         assert [r[1] for r in stub.requests] == [CONTRACT["broker_token_path"]]
 
 
-def test_a_closed_port_is_unreachable(tmp_path, monkeypatch, capsys):
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        closed = s.getsockname()[1]
-    monkeypatch.setattr(outpost_lifecycle, "DAEMON_PORT", closed)
-    env = _fence(tmp_path)
+def test_no_socket_is_outpost_not_running_naming_the_socket(tmp_path, monkeypatch, capsys, state):
+    env = _fence(tmp_path, state)
     rc, out, err = _run(monkeypatch, capsys, env, _credential(tmp_path))
     assert rc != 0 and out == ""
+    assert f"Outpost is unreachable at {gateway_socket_path(state)}; is it running?" in err
     line = _failure_file(env, "sess-1").read_text()
     assert "unreachable" in line
     assert SECRET not in err + line
 
 
-def test_a_slow_outpost_gives_up_inside_the_harness_budget(tmp_path, monkeypatch, capsys, stub):
+def test_a_socket_nothing_listens_on_is_unreachable(tmp_path, monkeypatch, capsys, state):
+    stale_socket(state)
+    env = _fence(tmp_path, state)
+    rc, out, err = _run(monkeypatch, capsys, env, _credential(tmp_path))
+    assert rc != 0 and out == "" and "Outpost is unreachable at" in err
+    assert "unreachable" in _failure_file(env, "sess-1").read_text()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root passes a folder's mode check, so no folder can deny it")
+def test_a_socket_the_operating_system_denies_us_is_not_reachable(tmp_path, monkeypatch, capsys, state):
+    folder = gateway_socket_path(state).parent
+    folder.mkdir(mode=0o700, parents=True)
+    folder.chmod(0o000)
+    try:
+        env = _fence(tmp_path, state)
+        rc, out, err = _run(monkeypatch, capsys, env, _credential(tmp_path))
+    finally:
+        folder.chmod(0o700)
+    assert rc != 0 and out == ""
+    assert f"Outpost's socket at {gateway_socket_path(state)} is not reachable from here (permission denied)" in err
+    line = _failure_file(env, "sess-1").read_text()
+    assert "not-reachable" in line and SECRET not in err + line
+
+
+def test_a_tcp_listener_on_the_outpost_port_with_no_socket_is_sent_nothing(tmp_path, monkeypatch, capsys, state):
+    with tcp_squatter() as squatter:
+        port = squatter.getsockname()[1]
+        env = {**_fence(tmp_path, state), "OUTPOST_URL": f"http://127.0.0.1:{port}", "OUTPOST_PORT": str(port)}
+        rc, out, err = _run(monkeypatch, capsys, env, _credential(tmp_path))
+        with pytest.raises(socket.timeout):
+            squatter.accept()
+    assert rc != 0 and out == "" and "Outpost is unreachable at" in err
+    assert SECRET not in err
+
+
+def test_a_slow_outpost_gives_up_inside_the_harness_budget(tmp_path, monkeypatch, capsys, stub, state):
     stub.mode = "hang"
     monkeypatch.setattr(broker_header, "TIMEOUT_SECONDS", 0.3)
-    env = _fence(tmp_path)
+    env = _fence(tmp_path, state)
     started = time.monotonic()
     rc, out, _ = _run(monkeypatch, capsys, env, _credential(tmp_path))
     assert rc != 0 and out == "" and time.monotonic() - started < 2.5
     assert "unreachable" in _failure_file(env, "sess-1").read_text()
 
 
-def test_the_port_comes_from_trailheads_setting_not_the_environment(tmp_path, monkeypatch, capsys, stub):
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        closed = s.getsockname()[1]
-    monkeypatch.setattr(outpost_lifecycle, "DAEMON_PORT", closed)
-    env = {**_fence(tmp_path), "OUTPOST_URL": f"http://127.0.0.1:{stub.port}",
-           "OUTPOST_PORT": str(stub.port)}
-    rc, out, _ = _run(monkeypatch, capsys, env, _credential(tmp_path))
-    assert rc != 0 and out == "" and stub.requests == []
-
-
-def test_a_missing_credential_file_fails_without_contacting_outpost(tmp_path, monkeypatch, capsys, stub):
-    env = _fence(tmp_path)
+def test_a_missing_credential_file_fails_without_contacting_outpost(tmp_path, monkeypatch, capsys, stub, state):
+    env = _fence(tmp_path, state)
     missing = tmp_path / "outpost-state" / "sessions" / "sess-1" / "broker-client.json"
     rc, out, err = _run(monkeypatch, capsys, env, missing)
     assert rc != 0 and out == "" and stub.requests == []
     assert "credential-missing" in _failure_file(env, "sess-1").read_text()
 
 
-def test_an_unreadable_credential_file_is_reported_as_such(tmp_path, monkeypatch, capsys, stub):
-    env = _fence(tmp_path)
+def test_an_unreadable_credential_file_is_reported_as_such(tmp_path, monkeypatch, capsys, stub, state):
+    env = _fence(tmp_path, state)
     directory = tmp_path / "outpost-state" / "sessions" / "sess-1" / "broker-client.json"
     directory.mkdir(parents=True)
     rc, out, _ = _run(monkeypatch, capsys, env, directory)
@@ -231,9 +274,9 @@ def test_an_unreadable_credential_file_is_reported_as_such(tmp_path, monkeypatch
      json.dumps({"client_id": CLIENT_ID, "client_secret": 5})],
 )
 def test_a_malformed_credential_file_fails_and_does_not_echo_its_contents(
-    tmp_path, monkeypatch, capsys, stub, body
+    tmp_path, monkeypatch, capsys, stub, body, state,
 ):
-    env = _fence(tmp_path)
+    env = _fence(tmp_path, state)
     rc, out, err = _run(monkeypatch, capsys, env, _credential(tmp_path, body=body))
     assert rc != 0 and out == "" and stub.requests == []
     line = _failure_file(env, "sess-1").read_text()
@@ -241,9 +284,9 @@ def test_a_malformed_credential_file_fails_and_does_not_echo_its_contents(
     assert SECRET not in err + line and body not in err + line
 
 
-def test_the_failure_line_is_named_for_the_session_dir_and_overwritten(tmp_path, monkeypatch, capsys, stub):
+def test_the_failure_line_is_named_for_the_session_dir_and_overwritten(tmp_path, monkeypatch, capsys, stub, state):
     stub.mode = "401"
-    env = _fence(tmp_path)
+    env = _fence(tmp_path, state)
     cred = _credential(tmp_path, session="sess-1")
     _run(monkeypatch, capsys, env, cred)
     stub.mode = "500"
@@ -252,9 +295,9 @@ def test_the_failure_line_is_named_for_the_session_dir_and_overwritten(tmp_path,
     assert "http-500" in line and "http-401" not in line and line.count("\n") == 1
 
 
-def test_a_credential_outside_a_session_dir_files_its_failure_under_unknown(tmp_path, monkeypatch, capsys, stub):
+def test_a_credential_outside_a_session_dir_files_its_failure_under_unknown(tmp_path, monkeypatch, capsys, stub, state):
     stub.mode = "401"
-    env = _fence(tmp_path)
+    env = _fence(tmp_path, state)
     odd = tmp_path / "not a session"
     odd.mkdir()
     f = odd / "broker-client.json"
@@ -264,9 +307,9 @@ def test_a_credential_outside_a_session_dir_files_its_failure_under_unknown(tmp_
     assert "http-401" in _failure_file(env, "unknown").read_text()
 
 
-def test_an_unwritable_state_dir_still_fails_closed(tmp_path, monkeypatch, capsys, stub):
+def test_an_unwritable_state_dir_still_fails_closed(tmp_path, monkeypatch, capsys, stub, state):
     stub.mode = "401"
-    env = _fence(tmp_path)
+    env = _fence(tmp_path, state)
     Path(env["XDG_STATE_HOME"]).parent.mkdir(parents=True, exist_ok=True)
     Path(env["XDG_STATE_HOME"]).write_text("a file where a directory must be")
     rc, out, err = _run(monkeypatch, capsys, env, _credential(tmp_path))

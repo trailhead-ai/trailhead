@@ -1,7 +1,8 @@
 """`trailhead broker-header`: exchange a session's broker credentials for an Authorization header.
 
 Harness-neutral: it reads the credential file Outpost wrote for a session, posts a
-client-credentials grant to Outpost's loopback token endpoint, and prints the header
+client-credentials grant to Outpost's token endpoint over the gateway unix socket (never TCP, so a process
+squatting on a port is sent nothing), and prints the header
 as the JSON object a harness's header helper expects. Every failure exits non-zero
 with nothing on stdout and leaves one secret-free line in trailhead's state directory.
 """
@@ -10,29 +11,26 @@ from __future__ import annotations
 
 import json
 import re
-import urllib.error
-import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from trailhead import outpost_lifecycle
+from trailhead.gateway import outpost_http
 from trailhead.launch_profile import InvalidBrokerSessionError, validate_broker_session
 from trailhead.paths import state_dir
-from trailhead.ranger.outpost_client import OutpostRefusal, _opener
 
 BROKER_TOKEN_PATH = "/broker/token"
 # The harness gives its header helper 10 seconds in all and re-runs it on reconnect.
 TIMEOUT_SECONDS = 3.0
-_MAX_BODY_BYTES = 65536
 _TOKEN_RE = re.compile(r"[\x21-\x7e]+")
 
 
 class _Failure(Exception):
     """A failure named by a fixed category; never carries a secret, token, or body."""
 
-    def __init__(self, category: str) -> None:
+    def __init__(self, category: str, message: str | None = None) -> None:
         super().__init__(category)
         self.category = category
+        self.message = message or category
 
 
 def _read_credential(path: Path) -> tuple[str, str]:
@@ -55,26 +53,24 @@ def _read_credential(path: Path) -> tuple[str, str]:
 
 
 def _exchange(client_id: str, client_secret: str) -> str:
-    form = urllib.parse.urlencode(
-        {"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret}
-    ).encode()
-    url = f"http://{outpost_lifecycle.DAEMON_HOST}:{outpost_lifecycle.DAEMON_PORT}{BROKER_TOKEN_PATH}"
     try:
-        with _opener().open(url, data=form, timeout=TIMEOUT_SECONDS) as resp:
-            status = resp.status
-            raw = resp.read(_MAX_BODY_BYTES + 1)
-    except OutpostRefusal:
-        raise _Failure("redirect-refused") from None
-    except urllib.error.HTTPError as exc:
-        raise _Failure(f"http-{exc.code}") from None
-    except OSError:
-        raise _Failure("unreachable") from None
-    if status != 200:
-        raise _Failure(f"http-{status}")
-    try:
-        token = json.loads(raw[:_MAX_BODY_BYTES]).get("access_token") if len(raw) <= _MAX_BODY_BYTES else None
-    except (ValueError, AttributeError):
-        token = None
+        reply = outpost_http.request(
+            "POST",
+            BROKER_TOKEN_PATH,
+            form={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret},
+            timeout=TIMEOUT_SECONDS,
+        )
+    except outpost_http.OutpostUnreachable as err:
+        raise _Failure("unreachable", f"Outpost is unreachable at {err.path}; is it running?") from None
+    except outpost_http.SocketNotReachable as err:
+        raise _Failure(
+            "not-reachable", f"Outpost's socket at {err.path} is not reachable from here (permission denied)"
+        ) from None
+    if 300 <= reply.status < 400:
+        raise _Failure("redirect-refused")
+    if reply.status != 200:
+        raise _Failure(f"http-{reply.status}")
+    token = reply.body.get("access_token")
     if not isinstance(token, str) or not _TOKEN_RE.fullmatch(token):
         raise _Failure("malformed-response")
     return token
@@ -105,5 +101,5 @@ def run(credential_file: str) -> tuple[int, str]:
         token = _exchange(client_id, client_secret)
     except _Failure as failure:
         _record_failure(_session_id(path), failure.category)
-        return 1, f"trailhead: broker-header: {failure.category}"
+        return 1, f"trailhead: broker-header: {failure.message}"
     return 0, json.dumps({"Authorization": f"Bearer {token}"})
