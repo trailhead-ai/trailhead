@@ -21,11 +21,17 @@ carries a top-level `"paused": true`, the agent route refuses its cases, and the
 push gate does not run them. An agent that is refused records the eval as not run
 and carries on; see [The agent route](#the-agent-route).
 
-There are two routes to that runner. **An agent** (an executor, a helper it
-dispatches, any session that is not a person at a terminal) goes through the
-bare eval command: see [The agent route](#the-agent-route). **A person at a
-terminal** runs the wrapped `claude plugin eval` recipe: see
+Eval runs from a host terminal, outside any Claude Code session: a session's
+sandbox hides Outpost's credentials from everything it runs, and eval runs
+scaffolds as the operator, so no eval command is excluded from the sandbox. There
+are two routes to the runner. **A person at a terminal** runs the wrapped
+`claude plugin eval` recipe: see
 [The terminal route](#the-terminal-route-a-person-running-the-runner-directly).
+**An agent** (an executor, a helper it dispatches, any session that is not a person
+at a terminal) goes through the bare eval command, which, called inside the sandbox,
+stops with `could-not-leave-sandbox` and the command for the operator to run from a
+terminal: see [The agent route](#the-agent-route). The push gate (`portage eval-gate`)
+behaves the same way: sandboxed, it stops with `eval-gate: sandboxed` and nothing is pushed.
 
 ## Write and run a case, step by step
 
@@ -69,9 +75,12 @@ terminal** runs the wrapped `claude plugin eval` recipe: see
 
 ## The agent route
 
-An agent never runs `claude plugin eval` itself and never hands an eval to the
-operator. It runs the eval command through its pinned shim, and the command runs
-the cases in a detached worker outside the agent's sandbox.
+An agent never runs `claude plugin eval` itself. Its eval command runs inside the
+sandbox like any other command, so it cannot start a worker that reads Outpost's
+credentials: a `start` from a session is not run (`could-not-leave-sandbox`) and
+prints the shim command for the operator to run from a terminal. Report the eval as
+not run and ask the operator to run it there. The rest of this section describes the
+command as it runs from a host terminal.
 
 **The shim.** `trailhead install` writes it as `portage-eval` in the `bin`
 directory of trailhead's state directory: `$XDG_STATE_HOME/trailhead/bin/portage-eval`,
@@ -83,8 +92,8 @@ absolute path of the shim, copy that one.
 **Run it bare, as one command.** The call is the shim path and its arguments and
 nothing else: no `cd` prefix, no `VAR=value` env prefix, no `&&`, `;`, `|` or
 redirect, no `$(...)`, and no leading `~` (the path begins with `/`). The harness
-matches the command's text against what it allows to run outside the sandbox, so
-any wrapping makes the call an ordinary sandboxed one. If your working directory
+matches the command's text against what it allows without a prompt, so
+any wrapping makes the call an ordinary prompted one. If your working directory
 is not inside the repository, pass `--repo <absolute repo path>` rather than
 `cd`.
 

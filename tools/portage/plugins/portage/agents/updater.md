@@ -125,7 +125,14 @@ tool result.
    - **1**: **stop. Nothing is pushed in any repo**, whatever the other repos' verdicts. Do not
      re-run the case, edit the state, or look for another way past it. Go to "On a stop" below.
 
-**A non-zero exit from `plan` or from `verdict`** (usage error, refused state, fault; a `verdict` exit
+**Exit 3 from `plan` or `run`, first line `eval-gate: sandboxed`**, means this session runs inside the
+sandbox, where the eval gate cannot run (the sandbox hides Outpost's credentials from eval). That is a
+stop, not a gate error: gate no further repo, skip Steps 3-7, and report that nothing was pushed because the
+gate must be run from a terminal; tell the operator to run the same push (`/portage:pull_request update`
+with `--eval-gate` where it applied) from a terminal outside any Claude Code session. Make no state
+directory for it and never try another way past it; leave `pr_pairs:` empty.
+
+**A non-zero exit from `plan` or from `verdict` other than that** (usage error, refused state, fault; a `verdict` exit
 of 1 is the stop above, not this) is a gate error, not a verdict. Render that repo's section and let its
 push proceed:
 

@@ -177,6 +177,11 @@ fallback, no GNU `readlink -f`, macOS-safe).
   code-vs-document consistency check** — a document must name a token, reason-code, or
   constant the code actually emits, with the expected set derived from the module rather
   than retyped. That is wiring, not behavior, and an eval is the wrong instrument for it.
+- **Eval runs from a host terminal, not from a session.** `claude plugin eval`,
+  `portage eval-gate` and the `portage-eval` shim run inside a session's sandbox, which
+  hides Outpost's credentials from them; `portage eval-gate` and `portage eval start`
+  stop there and name the command to run from a terminal. Report a case you could not run
+  as not run and ask the operator to run it.
 - **A test needs an input it can vary.** Running the subject is the floor; the bar is
   showing its answer changes with what it was given. An assertion whose subject has one
   possible output — a default value, a shipped inventory, a byte-for-byte snapshot, a

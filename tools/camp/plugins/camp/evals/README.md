@@ -2,7 +2,7 @@
 
 Behavioural eval cases for camp's own prose — workspace provisioning, group resolution, and the claude trust pre-seed path.
 
-A case here is a directory run by `claude plugin eval`. The case shape, how to write
+A case here is a directory run by `claude plugin eval`, from a host terminal (a session's sandbox hides Outpost's credentials, so the eval commands stop there and ask the operator to run them from a terminal). The case shape, how to write
 and run one are in `docs/eval-protocol.md` — read it before adding a
 case. Results go in `tools/camp/MANUAL-EVAL.md`, created alongside this corpus's first
 case; it does not exist yet.

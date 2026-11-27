@@ -3,7 +3,7 @@
 Behavioural eval cases for craft's own prose — the spec gauntlet, the council lenses, the execute
 loop, and the maturity/citation machinery.
 
-Each runner case is a directory here, run by `claude plugin eval`. The case shape, how to write and
+Each runner case is a directory here, run by `claude plugin eval` from a host terminal (a session's sandbox hides Outpost's credentials, so the eval commands stop there and ask the operator to run them from a terminal). The case shape, how to write and
 run one, and the sandbox are in `docs/eval-protocol.md` — read it before adding a case. Results,
 with per-case evidence and limitations, go in `tools/craft/MANUAL-EVAL.md`.
 

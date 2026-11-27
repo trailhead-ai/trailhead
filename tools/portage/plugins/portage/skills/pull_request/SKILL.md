@@ -71,6 +71,9 @@ updater's own words:
 - It says the push was **stopped**: a case scored below its bar and nothing was pushed or updated in any
   repo. Name the failing case(s) and the kept state path it gives, pass on its ways forward, and do not
   launch `monitor` (there are no PRs to watch).
+- It says the push was **stopped because the session is sandboxed** (`eval-gate: sandboxed`): the eval gate
+  runs only from a terminal outside any Claude Code session, and nothing was pushed. Tell the operator to
+  run the same command from a terminal; do not launch `monitor`.
 - It says the gate **did not run**: the push went ahead and the PR body says why. When the line marks the
   reason as persistent, tell the operator plainly that every push will skip the gate until they fix it, and
   repeat the remedy the line gives.
@@ -599,7 +602,8 @@ Every camp group member is a peer — there is no privileged member.
       `split_procedure=true` the gate applies; keep `<dir>`. With any other `status` (`gate-off` included), or no such line,
       there is no gate for this repo: skip it and give `portage merge` no `--eval-state` for it (`portage merge` makes the same
       decision itself and refuses when one was needed). If `plan` exits non-zero, say so in the
-      report and rely on that refusal.
+      report and rely on that refusal. An exit 3 with `eval-gate: sandboxed` means this session cannot run
+      the gate: tell the operator to run the merge-tier gate from a terminal, and do not merge.
    2. Run every planned case, one foreground call each, one at a time, passing the case name alone
       (the part after the last colon of the printed line). Give the Bash tool `timeout: 600000`; never
       background a run:

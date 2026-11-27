@@ -332,6 +332,8 @@ def _denial_session(tmp_path_factory, label, *, kind, deny_read=True):
                 f"127.0.0.1:{outpost.port}"
             )
         steps = denial_steps(outpost.state, other_key, rendezvous, outpost.port)
+        if kind == "hand":
+            steps["eval_start"] = _eval_start_step(camp.w1, shim_bin / "portage-eval", outpost.state)
         if kind == "launched":
             steps["gateway_run_list"] = f"{gateway} run list"
         paths = read_tool_paths(outpost.state, other_key, camp.w1)
@@ -351,6 +353,21 @@ def _denial_session(tmp_path_factory, label, *, kind, deny_read=True):
         facts = denial_facts(outpost.state, other_key, actor)
     shutil.rmtree(rendezvous, ignore_errors=True)
     return facts, session, paths
+
+
+def _eval_start_step(workspace: Path, eval_shim: Path, state: Path) -> str:
+    """A scaffold that reads the operator credential and records that it ran, then `portage-eval start` aimed at its
+    plugin; the step prints the start's exit status and whether the scaffold ran."""
+    plugin = workspace / "eval-plugin"
+    (plugin / "evals").mkdir(parents=True, exist_ok=True)
+    scaffold = plugin / "scaffold.sh"
+    scaffold.write_text(f'#!/bin/sh\ncat "{state}/operator/credential" > /dev/null && touch "{workspace}/eval-scaffold-ran"\n')
+    scaffold.chmod(0o755)
+    return (
+        f'cd "{workspace}" && {shlex.quote(str(eval_shim))} start --require-version 2 --plugin eval-plugin --case c; '
+        f'echo "start_exit=$?"; sleep 2; if [ -e "{workspace}/eval-scaffold-ran" ]; then echo scaffold_ran=yes; '
+        "else echo scaffold_ran=no; fi"
+    )
 
 
 BASH_DENIAL_CHECKS = [
@@ -383,6 +400,17 @@ def launched_session(tmp_path_factory):
 def test_a_hand_started_session_cannot_read_or_run_what_it_must_not_by_shell(check, hand_started_session):  # AC82, AC84
     facts, session, _ = hand_started_session
     check(facts, session)
+
+
+def test_a_hand_started_session_running_eval_is_stopped_inside_the_sandbox_and_no_scaffold_reads_the_credential(
+    hand_started_session,
+):  # AC82
+    facts, session, _ = hand_started_session
+    assert facts.exists["operator_read"], "the operator credential does not exist, so a refusal proves nothing"
+    out = _ran(session, "eval_start")
+    assert "could-not-leave-sandbox" in out, f"eval did not stop inside the sandbox: {out!r}"
+    assert "start_exit=3" in out, out
+    assert "scaffold_ran=no" in out, f"a scaffold ran and read the operator credential: {out!r}"
 
 
 @pytest.mark.parametrize("check", READ_TOOL_DENIAL_CHECKS, ids=lambda c: c.__name__)

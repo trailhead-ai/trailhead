@@ -13,7 +13,9 @@ split_procedure=<true|false>`` line per selected case (and a ``mapping-invalid: 
 when a mapping is refused); every branch-controlled string is printed through ``verdict._safe``. Exit 0
 whenever a plan was written, including every non-selecting status. The gate is off unless ``--opt-in`` is
 given or the group TOML's ``[release].eval_gate`` is true; off writes a ``gate-off`` plan with no cases;
-exit 2 only for usage errors (e.g. ``--repo`` is not a git work tree).
+exit 2 only for usage errors (e.g. ``--repo`` is not a git work tree). Called inside the sandbox with the gate on,
+it stops before planning: ``eval-gate: sandboxed`` and the instruction to run it from a terminal, exit 3 (`run`
+does the same; see ``portage.eval_gate.sandbox``).
 
 ``run --state <dir> --case <name> [--timeout-seconds N]`` runs one planned case and
 writes ``<state>/results/<case>.json`` (shape in ``portage.eval_gate.run``). Output:
@@ -39,6 +41,7 @@ from pathlib import Path
 
 from ..eval_gate.run import DEFAULT_TIMEOUT_SECONDS, RunRefused, atomic_write, record_crash, run_case
 from ..eval_gate import cost as gate_cost
+from ..eval_gate import sandbox as gate_sandbox
 from ..eval_gate import timings as gate_timings
 from ..eval_gate.setting import gate_enabled
 from ..eval_gate import verdict as gate_verdict
@@ -77,10 +80,17 @@ def _add_plan(group) -> None:
     p.set_defaults(func=cmd_plan)
 
 
+def _stop_sandboxed() -> int:
+    print(gate_sandbox.MESSAGE)
+    return 3
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
+    gate_on = args.opt_in or gate_enabled(args.group_toml)
+    if gate_on and gate_sandbox.is_sandboxed():
+        return _stop_sandboxed()
     try:
-        state, result = plan(Path(args.repo), args.base, args.tier,
-                             gate_on=args.opt_in or gate_enabled(args.group_toml))
+        state, result = plan(Path(args.repo), args.base, args.tier, gate_on=gate_on)
     except (GitError, OSError) as e:
         print(f"eval-gate plan: {e}", file=sys.stderr)
         return 2
@@ -113,6 +123,8 @@ def _add_run(group) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    if gate_sandbox.is_sandboxed():
+        return _stop_sandboxed()
     try:
         result = run_case(Path(args.state), args.case, timeout_seconds=args.timeout_seconds)
     except RunRefused as e:

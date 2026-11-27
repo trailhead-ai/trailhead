@@ -36,3 +36,8 @@ def contained_tempdir(tmp_path, monkeypatch):
     scratch = tmp_path / "system-tmp"
     scratch.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    from portage.eval_gate import sandbox
+
+    no_mounts = tmp_path / "no-mounts"
+    no_mounts.write_text("")
+    monkeypatch.setattr(sandbox, "MOUNTINFO", no_mounts)
