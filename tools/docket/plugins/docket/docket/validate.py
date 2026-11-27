@@ -7,7 +7,7 @@ change commands report as the outcome `refused` with exit 2 and nothing written.
 
 A REF is `<vault>/<kind>/<slug>`: exactly three non-empty parts, no value begins with a dash, and
 kind and slug use the store's own validators (lowercase letters, digits, `.`, `_`, `-`). A workspace
-is `GROUP/SLUG` under the same rule. A vault named on its own (set-order, vault-order) is one part with
+is `GROUP/SLUG`, the group under the vault-name rule and the slug under the slug rule. A vault named on its own (set-order, vault-order) is one part with
 no `/`, under the store's vault-name rule. The store validates again on every path it opens.
 """
 from __future__ import annotations
@@ -80,7 +80,7 @@ def parse_workspace(value: str) -> Workspace:
     if len(parts) != 2 or not all(parts):
         raise Refused(f"{value!r} is not a workspace; expected GROUP/SLUG")
     try:
-        return Workspace(validate_slug(parts[0]), validate_slug(parts[1]))
+        return Workspace(validate_vault_name(parts[0]), validate_slug(parts[1]))
     except UnsafeNameError as exc:
         raise Refused(str(exc)) from exc
 
@@ -125,7 +125,7 @@ def check_kind(runner: Runner, ref: Ref) -> None:
         try:
             sidecar = json.loads(proc.stdout)["sidecar"]
             keywords = sidecar.get("keywords") or []
-        except (ValueError, KeyError, TypeError, AttributeError):
+        except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
             raise Refused(f"{ref.text}: lore printed a record that cannot be read") from None
         if ref.kind in LISTABLE_KINDS or (ref.kind == "blob" and NOTE_KEYWORD in keywords):
             return

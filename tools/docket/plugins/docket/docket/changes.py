@@ -312,7 +312,7 @@ _MESSAGES = {
     pipeline.SAVED: "Saved and synced.",
     pipeline.UNCHANGED: "Nothing changed.",
     pipeline.SAVED_NOT_SYNCED: "Saved on this host, but not synced to the remote; run docket again or lore sync.",
-    pipeline.LOST_TO_REMOTE: "The change did not survive the sync because another host changed the same list; "
+    pipeline.LOST_TO_REMOTE: "The change did not survive the sync because another writer changed the same list; "
                              "the list now stands as shown.",
 }
 

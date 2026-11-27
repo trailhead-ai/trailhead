@@ -51,7 +51,7 @@ def _array(stdout: str) -> list[Any] | None:
     for candidate in [stdout, *(line for line in stdout.splitlines() if line.startswith("["))]:
         try:
             doc = json.loads(candidate)
-        except ValueError:
+        except (ValueError, RecursionError):
             continue
         if isinstance(doc, list):
             return doc

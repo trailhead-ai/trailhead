@@ -127,7 +127,7 @@ and exits with a code. After every change, say which entries were touched, each 
 - **Exit 3**, `saved-not-synced`: the change is saved on this machine but not synced, so other hosts and the page will not see
   it until a later sync. Write its own line, exactly in the form "Saved here but not synced: other hosts and the page will not see this until a later sync.",
   and quote `sync_warning` as data.
-- **Exit 4**, `lost-to-remote`: the change was lost because another host changed the same list. Show the list as it now stands
+- **Exit 4**, `lost-to-remote`: the change was lost because another writer (another host, or another session or the page on this one) changed the same list. Show the list as it now stands
   (`lists`) in the data fence and offer to redo the change; redo it only if the operator says yes.
 - **Exit 1**: the command failed (a line starting `docket:` on stderr) or, with outcome `partial`, some lists were written and
   some not: relay the message as data and name `written` and `not_written`.

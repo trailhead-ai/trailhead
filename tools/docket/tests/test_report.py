@@ -25,6 +25,7 @@ from docket.store import DocketList, Entry, Store, Workspace
 
 FIXTURES = Path(__file__).parent / "fixtures"
 ZERO_WIDTH = chr(0x200B)
+DEEP = "[" * 100_000 + "]" * 100_000
 
 
 class FakeLore:
@@ -63,6 +64,8 @@ class FakeLore:
                 return completed(argv, 1, "", "lore: internal error\n")
             if outcome == "garbled":
                 return completed(argv, 0, "not json", "")
+            if outcome == "nested":
+                return completed(argv, 0, DEEP, "")
             _, title, status = outcome
             body = {"record_id": argv[6], "sidecar": {"title": title, "status": status, "keywords": []}}
             return completed(argv, 0, json.dumps(body), "revision: abc123\n")
@@ -219,7 +222,7 @@ class TestEntries:
 
 
 class TestLookupFailures:
-    @pytest.mark.parametrize("outcome", ["timeout", "crash", "garbled"])
+    @pytest.mark.parametrize("outcome", ["timeout", "crash", "garbled", "nested"])
     def test_a_failed_lookup_is_status_unknown_and_stays_live_never_missing(self, env, outcome):
         env.lst("proj", "a1")
         env.fake.records["proj/task/a1"] = outcome
@@ -343,6 +346,7 @@ class TestCamp:
         subprocess.TimeoutExpired(["camp"], 30),
         FileNotFoundError("camp"),
         completed([], 0, "no array here", ""),
+        completed([], 0, DEEP, ""),
     ])
     def test_a_camp_failure_leaves_running_on_unknown_not_empty(self, env, camp_result):
         self._attach(env, "gamma")

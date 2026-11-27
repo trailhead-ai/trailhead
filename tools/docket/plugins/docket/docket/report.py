@@ -83,7 +83,7 @@ def _lookup(runner: Runner, vault: str, entry: Entry) -> _Lookup:
     try:
         sidecar = json.loads(proc.stdout)["sidecar"]
         return _Lookup(_text(sidecar.get("title")), _text(sidecar.get("status")))
-    except (ValueError, KeyError, TypeError, AttributeError):
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         return _Lookup(unknown=True)
 
 
