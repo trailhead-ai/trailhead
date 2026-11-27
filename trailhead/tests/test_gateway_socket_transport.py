@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import socket
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -188,3 +189,80 @@ def test_host_only_a_real_socket_in_a_folder_open_to_others_is_refused_and_sent_
         with pytest.raises(outpost_http.UnsafeSocket):
             outpost_http.request("GET", "/gateway/runs")
         assert stub.requests == []
+
+
+class _FakeResponse:
+    def __init__(self, status: int, body: bytes) -> None:
+        self.status = status
+        self._body = body
+        self.asked: list[int | None] = []
+
+    def read(self, amt: int | None = None) -> bytes:
+        self.asked.append(amt)
+        return self._body if amt is None else self._body[:amt]
+
+    def readline(self) -> bytes:
+        return b""
+
+    def close(self) -> None:
+        pass
+
+
+class _FakeConnection:
+    def __init__(self, response: _FakeResponse) -> None:
+        self._response = response
+        self._path = Path("/fake/gateway.sock")
+
+    def request(self, *args, **kwargs) -> None:
+        pass
+
+    def getresponse(self) -> _FakeResponse:
+        return self._response
+
+    def close(self) -> None:
+        pass
+
+
+def _reply_of(monkeypatch, status: int, body: bytes) -> _FakeResponse:
+    response = _FakeResponse(status, body)
+    monkeypatch.setattr(outpost_http, "_connection", lambda *a, **k: _FakeConnection(response))
+    return response
+
+
+def _json_of_size(size: int) -> bytes:
+    filler = "x" * (size - len('{"k": ""}'))
+    body = ('{"k": "%s"}' % filler).encode()
+    assert len(body) == size
+    return body
+
+
+def test_a_reply_exactly_at_the_cap_is_read_and_parsed(monkeypatch):
+    _reply_of(monkeypatch, 200, _json_of_size(outpost_http.MAX_REPLY_BYTES))
+    assert outpost_http.request("GET", "/x").body["k"].startswith("xxx")
+
+
+def test_a_reply_one_byte_over_the_cap_is_refused_as_an_unexpected_reply(monkeypatch):
+    _reply_of(monkeypatch, 200, _json_of_size(outpost_http.MAX_REPLY_BYTES + 1))
+    with pytest.raises(outpost_http.UnexpectedReply) as raised:
+        outpost_http.request("GET", "/x")
+    assert isinstance(raised.value, outpost_http.OutpostUnreachable)
+    assert "xxxx" not in raised.value.message
+
+
+def test_an_endless_reply_is_not_read_past_the_cap_plus_one(monkeypatch):
+    response = _reply_of(monkeypatch, 200, b"y" * (outpost_http.MAX_REPLY_BYTES * 4))
+    with pytest.raises(outpost_http.UnexpectedReply):
+        outpost_http.request("GET", "/x")
+    assert response.asked == [outpost_http.MAX_REPLY_BYTES + 1]
+
+
+def test_an_oversized_refusal_body_on_a_stream_is_an_unexpected_reply(monkeypatch):
+    _reply_of(monkeypatch, 500, b"z" * (outpost_http.MAX_REPLY_BYTES + 1))
+    with pytest.raises(outpost_http.UnexpectedReply):
+        outpost_http.open_stream("/x")
+
+
+def test_a_small_refusal_body_on_a_stream_is_still_a_refusal(monkeypatch):
+    _reply_of(monkeypatch, 403, b'{"error": "nope"}')
+    stream = outpost_http.open_stream("/x")
+    assert (stream.refusal.status, stream.refusal.body) == (403, {"error": "nope"})

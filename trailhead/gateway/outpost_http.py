@@ -45,6 +45,9 @@ REACH_BUDGET_SECONDS = 4.5
 """Time allowed to reach Outpost: a little under five seconds, so a command that cannot reach it
 has also started its interpreter and printed its message within five."""
 IDLE_TIMEOUT_SECONDS = 120.0
+MAX_REPLY_BYTES = 64 * 1024
+"""The most of a reply body read for a request or a refusal: Outpost's JSON answers are small, and a larger one is
+refused rather than held in memory."""
 
 _deadline: float | None = None
 
@@ -81,6 +84,14 @@ class UnsafeSocket(SocketNotReachable):
         super().__init__(path)
         self.reason = reason
         self.message = f"Outpost's socket at {path} is not safe to use ({reason}); refusing to send anything to it"
+
+
+class UnexpectedReply(OutpostUnreachable):
+    """Outpost's reply body is larger than ``MAX_REPLY_BYTES``, which no answer it gives is."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.message = f"Outpost's reply at {path} was larger than {MAX_REPLY_BYTES} bytes; refusing it"
 
 
 class ReplyTimedOut(OutpostUnreachable):
@@ -236,7 +247,7 @@ def request(
     try:
         conn.request(method, path, body=data, headers=send_headers)
         resp = conn.getresponse()
-        status, raw = resp.status, resp.read()
+        status, raw = resp.status, _read_body(resp, conn._path)
     except (SocketNotReachable, OutpostUnreachable):
         raise
     except TimeoutError as err:
@@ -246,6 +257,13 @@ def request(
     finally:
         conn.close()
     return _reply(status, raw)
+
+
+def _read_body(resp: http.client.HTTPResponse, path: Path) -> bytes:
+    raw = resp.read(MAX_REPLY_BYTES + 1)
+    if len(raw) > MAX_REPLY_BYTES:
+        raise UnexpectedReply(path)
+    return raw
 
 
 def _reply(status: int, raw: bytes) -> Reply:
@@ -285,7 +303,7 @@ def open_stream(path: str, *, headers: dict[str, str] | None = None) -> Stream:
         conn.request("GET", path, headers={**(headers or {}), "Connection": "close"})
         resp = conn.getresponse()
         if not 200 <= resp.status < 300:
-            raw = resp.read()
+            raw = _read_body(resp, conn._path)
             refusal = _reply(resp.status, raw)
             return Stream(conn, resp, refusal)
     except (SocketNotReachable, OutpostUnreachable):
