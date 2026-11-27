@@ -40,6 +40,7 @@ from ._gateway_e2e_support import (
     pull_stream_error,
     split_image_ref,
     preflight_problems,
+    require_run_host,
     streamed_as_produced,
 )
 
@@ -170,6 +171,69 @@ def test_a_config_that_is_missing_is_a_problem_naming_the_path(tmp_path):
     missing = tmp_path / "absent.toml"
     [problem] = _problems(tmp_path, config=missing)
     assert str(missing) in problem
+
+
+# --- require_run_host: each setup check, driven through injected probes -----------------------------------
+
+
+def _require(tmp_path: Path, *, groups=(1000, GID), known=True, answers=lambda path: True, home_mode=0o750, config=None):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    home.chmod(home_mode)
+
+    def gid_of(name: str) -> int:
+        if known and name == RUN_GROUP:
+            return GID
+        raise KeyError(name)
+
+    return require_run_host(
+        config_path=config if config is not None else _config(tmp_path),
+        pid=77,
+        proc=_proc(tmp_path, 77, list(groups)),
+        gid_of=gid_of,
+        ping=answers,
+        home=home,
+    )
+
+
+def test_a_host_that_is_set_up_hands_back_the_runs_table(tmp_path):
+    config = _config(tmp_path)
+    assert _require(tmp_path, config=config) == load_runs_host(config)
+
+
+def test_a_missing_runs_table_is_named(tmp_path):
+    with pytest.raises(AssertionError, match=r"has no \[runs\] table"):
+        _require(tmp_path, config=_config(tmp_path, text="[daemon]\nhttp_port = 7313\n"))
+
+
+def test_a_shell_without_the_run_group_is_named(tmp_path):
+    with pytest.raises(AssertionError, match=f"does not hold the {RUN_GROUP} group"):
+        _require(tmp_path, groups=(1000,))
+
+
+def test_an_engine_socket_that_does_not_answer_is_named_by_require(tmp_path):
+    with pytest.raises(AssertionError, match="run engine socket .* does not answer"):
+        _require(tmp_path, answers=lambda path: False)
+
+
+def test_a_filter_socket_held_by_a_running_outpost_is_named(tmp_path):
+    config = _config(tmp_path)
+    (load_runs_host(config).runs_folder / "filter.sock").write_text("")
+    with pytest.raises(AssertionError, match="filter.sock is already served"):
+        _require(tmp_path, config=config)
+
+
+def test_a_stale_filter_socket_is_named(tmp_path):
+    config = _config(tmp_path)
+    host = load_runs_host(config)
+    (host.runs_folder / "filter.sock").write_text("")
+    with pytest.raises(AssertionError, match="filter.sock is a stale file"):
+        _require(tmp_path, config=config, answers=lambda path: path == host.engine_socket)
+
+
+def test_home_permission_bits_the_run_account_could_read_are_named(tmp_path):
+    with pytest.raises(AssertionError, match="your home is 0755"):
+        _require(tmp_path, home_mode=0o755)
 
 
 def test_the_operators_runs_table_is_carried_over_exactly(tmp_path):

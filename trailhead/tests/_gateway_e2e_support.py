@@ -19,6 +19,8 @@ import os
 import re
 import shlex
 import shutil
+import argparse
+import xml.etree.ElementTree as ET
 import socket
 import stat
 import sqlite3
@@ -695,13 +697,95 @@ def preflight_problems(
     return problems
 
 
-def require_run_host() -> RunsHost:
-    """The operator's ``[runs]`` table, or an AssertionError naming everything to fix, before any scenario runs."""
-    path = operator_config_path()
-    problems = preflight_problems(path, pid=os.getpid())
+def require_run_host(*, config_path: Path | None = None, pid: int | None = None, **probes) -> RunsHost:
+    """The operator's ``[runs]`` table, or an AssertionError naming everything to fix, before any scenario runs.
+
+    ``probes`` (``proc``, ``gid_of``, ``ping``, ``home``) replace the host's own group, socket and home checks.
+    """
+    path = config_path if config_path is not None else operator_config_path()
+    problems = preflight_problems(path, pid=pid if pid is not None else os.getpid(), **probes)
     if problems:
         raise AssertionError("the run scenario cannot start on this host:\n" + "\n".join(f"- {p}" for p in problems))
     return load_runs_host(path)
+
+
+def _first_setup_check(error_text: str, message: str) -> str:
+    """The first problem a setup report lists (`- <problem>`), else the error's own first line."""
+    for line in error_text.splitlines():
+        if line.startswith("- "):
+            return line[2:].strip()
+    first = (message or error_text).strip().splitlines()
+    return first[0] if first else "unknown error"
+
+
+def red_verdict(
+    junit_xml: str,
+    log: str,
+    *,
+    expect_fail: int,
+    markers: tuple[str, ...],
+    per_failure: bool = False,
+    allow_pass: tuple[str, ...] = (),
+) -> tuple[bool, str]:
+    """The verdict of a red run over its recorded pytest output: (valid, one-line reason).
+
+    Any errored test means the run did not set up, and the verdict names the first setup check that failed.
+    Otherwise the run is valid when exactly ``expect_fail`` tests failed and a marker shows the missing
+    surface: anywhere in the log, or, with ``per_failure``, in every failure (any other passing test, bar
+    those named in ``allow_pass``, is then invalid).
+    """
+    root = ET.fromstring(junit_xml)
+    cases = list(root.iter("testcase"))
+    errors = [c for c in cases if c.find("error") is not None]
+    failed = [c for c in cases if c.find("failure") is not None]
+    if errors:
+        err = errors[0].find("error")
+        return False, "setup failed: " + _first_setup_check(err.text or "", err.get("message", ""))
+    counts = f"{len(failed)} failures, 0 errors"
+    if len(failed) != expect_fail:
+        return False, f"invalid: {len(failed)} failures, expected {expect_fail} (0 errors)"
+    if per_failure:
+        bad = []
+        for case in cases:
+            fail = case.find("failure")
+            if fail is None:
+                if not any(name in case.get("name", "") for name in allow_pass):
+                    bad.append(case.get("name", ""))
+            elif not any(m in (fail.get("message", "") + (fail.text or "")) for m in markers):
+                bad.append(case.get("name", ""))
+        if bad:
+            return False, f"invalid: {counts}; not failing on the missing surface: {', '.join(bad)}"
+    elif not any(m in log for m in markers):
+        return False, f"invalid: {counts}; none of {', '.join(repr(m) for m in markers)} in the output"
+    return True, "red valid"
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="_gateway_e2e_support")
+    sub = parser.add_subparsers(dest="command", required=True)
+    verdict = sub.add_parser("red-verdict", help="judge a red run from its junit report and log")
+    verdict.add_argument("--xml", type=Path, required=True)
+    verdict.add_argument("--log", type=Path, required=True)
+    verdict.add_argument("--expect-fail", type=int, required=True)
+    verdict.add_argument("--marker", action="append", required=True)
+    verdict.add_argument("--per-failure", action="store_true")
+    verdict.add_argument("--allow-pass", action="append", default=[])
+    args = parser.parse_args(argv)
+    try:
+        xml, log = args.xml.read_text(), args.log.read_text()
+    except OSError as err:
+        print(f"invalid: no pytest report to read ({err})")
+        return 1
+    ok, text = red_verdict(
+        xml, log, expect_fail=args.expect_fail, markers=tuple(args.marker),
+        per_failure=args.per_failure, allow_pass=tuple(args.allow_pass),
+    )
+    print(text)
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
 
 
 def copy_operator_config(source: Path, dest_dir: Path) -> Path:

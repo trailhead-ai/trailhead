@@ -26,9 +26,9 @@ with the operator's ``[runs]`` table, the ``outpost-run`` group and the run engi
 whole scenario at once, saying what to do, when the host is not ready; among the things it checks is that the
 operator's own Outpost is not serving the engine filter, which only one Outpost can bind, so stop it for the run.
 ``TRAILHEAD_GATEWAY_E2E_OUTPOST`` and ``TRAILHEAD_GATEWAY_E2E_TRAILHEAD`` name the checkouts whose Outpost and
-gateway command the scenario runs (``run-e2e-red-then-green.sh`` points them at the commits before the run
+gateway command the scenario runs (``scripts/run-e2e-red-then-green.sh`` points them at the commits before the run
 slice, where every run assertion must fail). The cancel scenario (``test_cancel_scenario_*``) is run by
-``run-e2e-cancel-red-then-green.sh``, which needs the act wrapper provisioned with ``setpriv --pdeathsig KILL``.
+``scripts/run-e2e-cancel-red-then-green.sh``, which needs the act wrapper provisioned with ``setpriv --pdeathsig KILL``.
 What a session reaches, and what this suite leaves untested, is
 listed in the report on the task, not here.
 """
