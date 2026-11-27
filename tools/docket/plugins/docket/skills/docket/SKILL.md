@@ -28,10 +28,14 @@ single Bash command, alone: no `;`, `&&` or `|` around it.
 3. **Free text never goes on a command line.** Only validated values do: a REF is `<vault>/<kind>/<slug>`, with the
    vault matching `[A-Za-z0-9][A-Za-z0-9._-]*`, the kind `[a-z][a-z0-9-]*` and the slug `[a-z0-9][a-z0-9._-]*`, and a
    workspace is `GROUP/SLUG` under the same rule. Check every REF, vault, group and slug against its shape before it goes into
-   a command; one that does not fit is never quoted or escaped in, it is refused and reported. Put every value after `--`.
-   The two places lore itself takes a word on the command line are a note's title and a search query: each is a short label of
-   a few of the operator's words reduced to plain text first (letters, digits, spaces and hyphens, at most six words) and passed
-   as one quoted argument. The operator's full sentence goes into the temp file, never into the command.
+   a command; one that does not fit is never quoted or escaped in, it is refused and reported. Put every value after `--`
+   wherever the command accepts it (`docket` and `lore search` and `lore record show` do).
+   The two places lore itself takes free words on the command line are a note's title and a search query. Each is a short
+   label of a few of the operator's words reduced to plain text first: letters, digits, spaces and hyphens, at most six
+   words, and **it must begin with a letter or a digit**, so drop any leading hyphens and spaces from it; when nothing is
+   left, ask the operator for a few words to call it. A title goes in as one quoted `--title` argument, and a search query
+   follows `--` as one quoted argument. The operator's full sentence goes into the temp file, never into the command.
+   This is the whole of the free text allowed on a command line: nothing else the operator said, however short, goes there.
 4. **Read only through bare `docket`.** It prints the whole docket as JSON and writes nothing. Do not read list files from
    the vault by hand, and do not use `docket report` or any other spelling to read.
 
@@ -63,8 +67,11 @@ workspace shows other hosts running it, and never say a workspace is stopped bec
 **A record.** Find the record the operator described and its vault: look in the vault named like the session's camp group
 first (the `**Group:**` line of the workspace CLAUDE.md, which must also be a configured vault from `lore vault ls --json`),
 then the other configured vaults, or only the vault the operator names. Derive the slug by lowercasing the title and joining
-its words with hyphens, then confirm it with `lore record show --json --vault <vault> <kind>/<slug>`; when that finds
-nothing, search with `lore search` on plain words from the description. It must be a spec, a task, or a blob with the keyword
+its words with hyphens. Check the derived slug against `[a-z0-9][a-z0-9._-]*` first: only a slug that fits is confirmed with
+`lore record show --json --vault <vault> -- <kind>/<slug>`, and one that does not fit (a stray slash, quote, dollar sign,
+bracket, leading hyphen or any other character outside the shape) is never put into a command, so go straight to the search.
+When the confirmation finds nothing, search with `lore search -- '<label>'`, the label being plain words from the
+description reduced as rule 3 says. It must be a spec, a task, or a blob with the keyword
 `note`. When more than one record fits, ask which. Then:
 
 - at the bottom (the default): `docket add -- <REF>...`
@@ -79,7 +86,7 @@ nothing, search with `lore search` on plain words from the description. It must 
    tool: a `# <title>` heading, then the operator's words as they said them.
 3. Run `lore record create --kind blob --keyword note --vault <vault> --title '<plain-text title>' < <tempfile>`. Its last
    line is the new record's id, `blob/<slug>`.
-4. Remove the temp file, whether or not the create worked.
+4. Remove the temp file with `rm -- <tempfile>`, run alone, whether or not the create worked, and before step 5.
 5. Run `docket add -- <vault>/blob/<slug>` (at the place the operator said, else the bottom).
 
 When step 5 does not land (exit 1, 2 or 4), the note still exists: report it by its vault and slug so it is not left
