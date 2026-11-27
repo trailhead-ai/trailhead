@@ -195,9 +195,11 @@ override=0
 prev=""
 for a in "$@"; do
   if [ "$prev" = "--noproxy" ] && [ -z "$a" ]; then override=1; fi
+  if [ "$prev" = "--unix-socket" ]; then sock="$a"; fi
   prev="$a"
   case "$a" in http://*) url="$a" ;; esac
 done
+if [ -n "$sock" ]; then echo "socket $sock"; exit 0; fi
 host=${url#http://}; host=${host%%[:/]*}
 case ",$NO_PROXY," in
   *",$host,"*) [ "$override" = 1 ] && echo proxy || echo direct ;;
@@ -206,7 +208,7 @@ esac
 """
 
 
-def test_the_probe_commands_reach_the_proxy_even_though_loopback_is_in_no_proxy(tmp_path):
+def test_the_probe_commands_reach_their_target_the_way_the_gateway_is_served(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     curl = bin_dir / "curl"
@@ -217,7 +219,12 @@ def test_the_probe_commands_reach_the_proxy_even_though_loopback_is_in_no_proxy(
         "HTTP_PROXY": "http://127.0.0.1:9",
         "NO_PROXY": "127.0.0.1",
     }
-    steps = sandbox_steps(tmp_path, 7000, 7001, tmp_path / "shims" / "outpost-gateway")
-    for name in ("command_route", "other_loopback_port", "register_without_authority"):
+    steps = sandbox_steps(tmp_path, 7001, tmp_path / "shims" / "outpost-gateway")
+    socket_path = tmp_path / "gateway" / "gateway.sock"
+    for name, expected in (
+        ("command_route", f"socket {socket_path}"),
+        ("other_loopback_port", "proxy"),
+        ("register_without_authority", f"socket {socket_path}"),
+    ):
         out = subprocess.run(["sh", "-c", steps[name]], env=env, capture_output=True, text=True).stdout
-        assert out.strip() == "proxy", name
+        assert out.strip() == expected, name

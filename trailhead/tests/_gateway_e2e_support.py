@@ -320,7 +320,7 @@ def render_sandbox_settings(
     return {"sandbox": sandbox, "permissions": {"allow": allow, "deny": deny}}
 
 
-def install_shims(root: Path, outpost: RealOutpost, *, port: int | None = None) -> Path:
+def install_shims(root: Path, outpost: RealOutpost) -> Path:
     """The bin dir the real ``trailhead install`` writes the gateway shims into, aimed at *outpost*.
 
     ``build_cli_shims`` with the Outpost tool enabled writes the pinned ``outpost-gateway`` and
@@ -328,13 +328,8 @@ def install_shims(root: Path, outpost: RealOutpost, *, port: int | None = None) 
     trailhead checkout, with the state folders baked in (so Outpost's state is ``outpost.state``, as the real
     install bakes the operator's). The shims run the real gateway command and the real hook's registration
     step. Both reach Outpost on the gateway socket under the baked Outpost state folder, so nothing about them is
-    replaced. A ``TokenRecorder`` relays TCP and cannot stand in front of that socket, so a *port* for one to
-    aim the shims at is refused.
+    replaced; a ``TokenRecorder`` entered on that state folder sits in front of the socket they use.
     """
-    if port is not None:
-        raise AssertionError(
-            "the gateway shims speak to Outpost's unix socket, which a TCP TokenRecorder cannot stand in front of"
-        )
     env = {
         "TRAILHEAD_STATE_DIR": str(root / "trailhead-state"),
         "OUTPOST_STATE_DIR": str(outpost.state),
@@ -348,7 +343,7 @@ def install_shims(root: Path, outpost: RealOutpost, *, port: int | None = None) 
     )
 
 
-def sandbox_steps(state: Path, port: int, other_port: int, gateway: Path) -> dict[str, str]:
+def sandbox_steps(state: Path, other_port: int, gateway: Path) -> dict[str, str]:
     """The Bash commands the sandboxed session runs, one tool call each, exactly as written.
 
     None prints a credential: the credential read is redirected to /dev/null, so only its exit status
@@ -356,13 +351,14 @@ def sandbox_steps(state: Path, port: int, other_port: int, gateway: Path) -> dic
     a chained one would need an approval a ``-p`` run cannot give.
     """
     probe = 'curl -sS --max-time 10 --noproxy "" --proxy "$HTTP_PROXY" -w "\\nhttp=%{http_code}\\n"'
+    unix = f'curl -sS --max-time 10 --unix-socket "{state}/gateway/gateway.sock" -w "\\nhttp=%{{http_code}}\\n"'
     post = "-X POST -H 'content-type: application/json' -d '{\"pid\":1,\"start_time\":1}'"
     return {
         "credential_read": f'cat "{state}"/sessions/*/gateway-client.json > /dev/null',
         "run_list": f"{gateway} run list",
-        "command_route": f"{probe} http://127.0.0.1:{port}/gateway/runs",
+        "command_route": f"{unix} http://localhost/gateway/runs",
         "other_loopback_port": f"{probe} http://127.0.0.1:{other_port}/",
-        "register_without_authority": f"{probe} {post} http://127.0.0.1:{port}/gateway/sessions",
+        "register_without_authority": f"{unix} {post} http://localhost/gateway/sessions",
     }
 
 
@@ -1399,20 +1395,21 @@ _ACCESS_TOKEN = re.compile(rb'"access_token"\s*:\s*"([^"]+)"')
 
 
 class TokenRecorder:
-    """A loopback relay to Outpost that learns every access token the gateway command sends or is given.
+    """A relay in front of Outpost's gateway socket that learns every access token the gateway command sends or is
+    given.
 
     The tokens live only in the command's memory and Outpost stores their hash, so the one place they can be
-    read to be looked for elsewhere is the wire. Aim the command at ``port`` (the test's stand-in interpreter
-    does) and ``tokens`` holds each ``Authorization: Bearer`` value and each ``access_token`` answer.
+    read to be looked for elsewhere is the wire. Entered on Outpost's state folder, it moves the running Outpost's
+    socket aside (a bound socket keeps accepting under its new name) and listens at the socket's place, so the
+    command, which finds the socket by that place, talks to the relay; ``tokens`` holds each
+    ``Authorization: Bearer`` value and each ``access_token`` answer. Leaving puts the socket back.
     """
 
-    def __init__(self, target_port: int) -> None:
-        self.target_port = target_port
+    def __init__(self, state: Path) -> None:
+        self.socket_path = state / "gateway" / "gateway.sock"
+        self.upstream_path = self.socket_path.with_name("gateway.upstream.sock")
         self.tokens: set[str] = set()
-        self._server = socket.socket()
-        self._server.bind(("127.0.0.1", 0))
-        self._server.listen(32)
-        self.port = self._server.getsockname()[1]
+        self._server: socket.socket | None = None
         self._open: list[socket.socket] = []
         self._thread = threading.Thread(target=self._accept, daemon=True)
 
@@ -1425,9 +1422,13 @@ class TokenRecorder:
             threading.Thread(target=self._relay, args=(client,), daemon=True).start()
 
     def _relay(self, client: socket.socket) -> None:
+        upstream = socket.socket(socket.AF_UNIX)
         try:
-            upstream = socket.create_connection(("127.0.0.1", self.target_port), timeout=30)
+            upstream.settimeout(30)
+            upstream.connect(str(self.upstream_path))
+            upstream.settimeout(None)
         except OSError:
+            upstream.close()
             client.close()
             return
         self._open += [client, upstream]
@@ -1452,6 +1453,11 @@ class TokenRecorder:
                     pass
 
     def __enter__(self) -> TokenRecorder:
+        os.rename(self.socket_path, self.upstream_path)
+        self._server = socket.socket(socket.AF_UNIX)
+        self._server.bind(str(self.socket_path))
+        self.socket_path.chmod(self.upstream_path.stat().st_mode & 0o777)
+        self._server.listen(32)
         self._thread.start()
         return self
 
@@ -1459,6 +1465,8 @@ class TokenRecorder:
         self._server.close()
         for sock in self._open:
             sock.close()
+        self.socket_path.unlink(missing_ok=True)
+        os.rename(self.upstream_path, self.socket_path)
 
 
 def known_secrets(outpost: RealOutpost, tokens: set[str]) -> dict[str, str]:

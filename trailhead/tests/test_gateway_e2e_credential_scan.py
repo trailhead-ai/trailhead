@@ -9,13 +9,15 @@ could never find one cannot pass. Its use against a real Outpost is in
 
 from __future__ import annotations
 
-import http.client
 import json
 import subprocess
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
+from trailhead.gateway import outpost_http
+
+from ._gateway_support import _UnixHTTPServer, gateway_socket_path, short_state_dir
 from ._gateway_e2e_support import (
     ArgumentSampler,
     TokenRecorder,
@@ -89,19 +91,21 @@ class _Origin(BaseHTTPRequestHandler):
         pass
 
 
-def test_the_token_recorder_relays_a_request_and_learns_the_tokens_both_ways():
-    origin = ThreadingHTTPServer(("127.0.0.1", 0), _Origin)
+def test_the_token_recorder_relays_a_request_and_learns_the_tokens_both_ways(monkeypatch):
+    state = short_state_dir()
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+    (state / "gateway").mkdir(mode=0o700)
+    origin = _UnixHTTPServer(str(gateway_socket_path(state)), _Origin)
     threading.Thread(target=origin.serve_forever, daemon=True).start()
     try:
-        with TokenRecorder(origin.server_address[1]) as recorder:
-            conn = http.client.HTTPConnection("127.0.0.1", recorder.port, timeout=10)
-            conn.request("POST", "/broker/token", body="x", headers={"Authorization": "Bearer bearer-PLANTED-5c"})
-            answer = conn.getresponse()
-            body = json.loads(answer.read())
-            conn.close()
+        with TokenRecorder(state) as recorder:
+            reply = outpost_http.request(
+                "POST", "/broker/token", headers={"Authorization": "Bearer bearer-PLANTED-5c"}, form={"x": "y"}
+            )
             time.sleep(0.1)
-        assert body["access_token"] == TOKEN, "the recorder did not relay the origin's answer"
+        assert reply.body["access_token"] == TOKEN, "the recorder did not relay the origin's answer"
         assert recorder.tokens == {TOKEN, "bearer-PLANTED-5c"}
+        assert outpost_http.request("POST", "/broker/token", form={"x": "y"}).status == 200, "the socket was not put back"
     finally:
         origin.shutdown()
         origin.server_close()

@@ -233,7 +233,7 @@ def _session(tmp_path_factory, bystander, label, *, cwd="w1", deny_read=True, wi
         settings = render_sandbox_settings(
             dotfiles_checkout(), outpost.state, outpost.port, deny_read=deny_read, gateway=shim_bin / "outpost-gateway"
         )
-        steps = sandbox_steps(outpost.state, outpost.port, bystander, shim_bin / "outpost-gateway")
+        steps = sandbox_steps(outpost.state, bystander, shim_bin / "outpost-gateway")
         session = run_claude_session(
             root,
             label,
@@ -512,7 +512,7 @@ def test_the_rendered_read_denials_name_the_absolute_temp_state_in_double_slash_
 def test_the_rendered_settings_exclude_and_allow_only_the_path_the_session_types(tmp_path):
     wrapper = tmp_path / "shims" / "outpost-gateway"
     settings = render_sandbox_settings(dotfiles_checkout(), tmp_path / "state", 7000, gateway=wrapper)
-    command = sandbox_steps(tmp_path, 7000, 7001, wrapper)["run_list"]
+    command = sandbox_steps(tmp_path, 7001, wrapper)["run_list"]
 
     assert command == f"{wrapper} run list"
     assert f"{wrapper} *" in settings["sandbox"]["excludedCommands"]
@@ -584,7 +584,7 @@ def run_world(tmp_path_factory):
         _control_the_listener(listener)
         with (
             real_outpost(root, camp, runs=host) as outpost,
-            TokenRecorder(outpost.port) as recorder,
+            TokenRecorder(outpost.state) as recorder,
             ArgumentSampler(interval=0.05) as sampler,
         ):
             ssh = home / ".ssh"
@@ -593,7 +593,7 @@ def run_world(tmp_path_factory):
             ports = (outpost.port, listener.server_address[1])
             for ws in (camp.w1, camp.w2):
                 build_fixture_repo(ws / "app", image=image, ssh=ssh, sentinel=sentinel, ports=ports, operator_home=home)
-            shim_bin = install_shims(root, outpost, port=recorder.port)
+            shim_bin = install_shims(root, outpost)
             gateway = shim_bin / "outpost-gateway"
             env = step_env(root, outpost)
             settings = render_sandbox_settings(dotfiles_checkout(), outpost.state, outpost.port, gateway=gateway)
@@ -945,7 +945,7 @@ def cancel_world(tmp_path_factory):
         sentinel.create()
         with (
             real_outpost(root, camp, runs=host) as outpost,
-            TokenRecorder(outpost.port) as recorder,
+            TokenRecorder(outpost.state) as recorder,
             ArgumentSampler(interval=0.05) as sampler,
         ):
             image = host.platforms["ubuntu-latest"]
@@ -958,7 +958,7 @@ def cancel_world(tmp_path_factory):
                 ports=(outpost.port, outpost.port),
                 operator_home=home,
             )
-            gateway = install_shims(root, outpost, port=recorder.port) / "outpost-gateway"
+            gateway = install_shims(root, outpost) / "outpost-gateway"
             env = step_env(root, outpost)
             port = outpost.port
             n = iter(range(10_000))

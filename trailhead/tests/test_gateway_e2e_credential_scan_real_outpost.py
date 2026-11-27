@@ -38,8 +38,8 @@ def test_a_session_listing_runs_through_the_real_shim_leaves_no_secret_or_token_
 ):  # AC81, AC86
     root = tmp_path_factory.mktemp("scan-flow")
     camp = make_camp(root)
-    with real_outpost(root, camp) as outpost, TokenRecorder(outpost.port) as recorder:
-        shim_bin = install_shims(root, outpost, port=recorder.port)
+    with real_outpost(root, camp) as outpost, TokenRecorder(outpost.state) as recorder:
+        shim_bin = install_shims(root, outpost)
         gateway = shim_bin / "outpost-gateway"
         with ArgumentSampler() as sampler:
             sections = _flow(
@@ -60,8 +60,8 @@ def test_a_session_listing_runs_through_the_real_shim_leaves_no_secret_or_token_
 def test_the_same_scan_reports_the_clients_real_secret_when_a_process_carries_it_in_its_arguments(tmp_path_factory):
     root = tmp_path_factory.mktemp("scan-control")
     camp = make_camp(root)
-    with real_outpost(root, camp) as outpost, TokenRecorder(outpost.port) as recorder:
-        shim_bin = install_shims(root, outpost, port=recorder.port)
+    with real_outpost(root, camp) as outpost, TokenRecorder(outpost.state) as recorder:
+        shim_bin = install_shims(root, outpost)
         _flow(root, camp, outpost, shim_bin, [("list", f"{shim_bin / 'outpost-gateway'} run list")])
         secrets = known_secrets(outpost, recorder.tokens)
         leaked = next(v for k, v in secrets.items() if k.startswith("client secret"))
