@@ -27,7 +27,8 @@ commits; and mode 0700. An interrupted write leaves the old file intact.
 The lock is an flock on `.git/docket/lock`, polled with LOCK_NB until a deadline and then
 refused with a named error. It is host-local; across hosts, sync settles conflicts.
 
-Confinement: no API takes a path. Write targets are only `lists/<validated vault name>.json` and
+Confinement: no API takes a path, and docket reads no environment variable to choose the vault (the default
+vault is whatever `lore vault ls` reports; lore resolves that from its own configuration). Write targets are only `lists/<validated vault name>.json` and
 `vault-order.json`, and every name and entry value is validated before it reaches a path or a file.
 """
 from __future__ import annotations
@@ -46,6 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, NamedTuple, Sequence
 
+from docket.clean import clean
 from docket.errors import DocketError
 
 FORMAT_VERSION = 1
@@ -159,11 +161,13 @@ def locate_default_vault(runner: Runner = default_runner) -> Path:
     """The path of the vault whose scope is "default"; its name is not guaranteed to be "default"."""
     proc = runner(["lore", "vault", "ls", "--json"])
     if proc.returncode != 0:
-        raise StoreError(f"cannot list vaults: {(proc.stderr or '').strip() or 'lore failed'}")
+        raise StoreError(f"cannot list vaults: {clean(proc.stderr or '') or 'lore failed'}")
     try:
         vaults = json.loads(proc.stdout)
     except ValueError as exc:
         raise StoreError(f"cannot list vaults: lore printed unparseable output ({exc})") from exc
+    except RecursionError:
+        raise StoreError("cannot list vaults: lore printed output nested too deeply to read") from None
     if not isinstance(vaults, list):
         raise StoreError("cannot list vaults: lore did not print a list")
     defaults = [v for v in vaults if isinstance(v, dict) and v.get("scope") == "default"]
@@ -415,6 +419,8 @@ class Store:
             doc = json.loads(text, object_pairs_hook=_reject_duplicate_keys, parse_constant=_reject_constant)
         except ValueError as exc:
             raise UnreadableListError(f"{path} is not valid JSON: {exc}") from exc
+        except RecursionError:
+            raise UnreadableListError(f"{path} is nested too deeply to read") from None
         if not isinstance(doc, dict):
             raise UnreadableListError(f"{path} must hold a JSON object")
         version = doc.get("version")

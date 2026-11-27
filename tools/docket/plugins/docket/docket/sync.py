@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
+from docket.clean import clean
 from docket.store import DocketList, Runner, Store, StoreError, Workspace
 
 SAVED = "saved"
@@ -63,15 +64,15 @@ def sync_vault(runner: Runner, vault: str) -> str | None:
     try:
         proc = runner(["lore", "sync", "--vault", vault, "--json"])
     except (OSError, subprocess.SubprocessError) as exc:
-        return f"lore sync could not run: {exc}"
+        return f"lore sync could not run: {clean(str(exc))}"
     doc = _sync_document(proc.stdout or "")
     outcomes = [v.get("outcome") for v in (doc or {}).get("vaults", []) if isinstance(v, dict)]
     bad = [o for o in outcomes if o not in _GOOD_SYNC_OUTCOMES]
     if proc.returncode == 0 and not bad:
         return None
-    reason = (bad[0] if bad else f"exit {proc.returncode}")
+    reason = clean(str(bad[0])) if bad else f"exit {proc.returncode}"
     notice = (proc.stderr or "").strip().splitlines()
-    return f"lore sync reported {reason}" + (f": {notice[0]}" if notice else "")
+    return f"lore sync reported {reason}" + (f": {clean(notice[0])}" if notice else "")
 
 
 def is_synced(runner: Runner, vault_root: Path) -> bool:

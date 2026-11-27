@@ -1,8 +1,11 @@
-"""Where a docket change writes: only the default vault's docket directory, whatever argv or environment says.
+"""Where a docket change writes: the default vault's docket directory, as lore reports it.
 
-The target is whatever `lore vault ls --json` reports as the default vault. No flag and no environment
-variable the commands could be given moves it, so a wrapper that redirects the tool for a test must do it
-through the runner it hands the command table, not through the command line or the environment.
+Docket reads no environment variable and has no flag for the target; the target is whatever
+`lore vault ls --json` reports as the default vault. What these tests pin is docket's own side: with the
+runner fixed, no variable in the process environment and no command-line flag changes where docket writes.
+Real lore resolves its default vault from its own configuration and environment, which is outside what
+docket (or a test with a scripted runner) can pin; a wrapper that redirects the tool for a test does it
+through the runner it hands the command table.
 """
 from __future__ import annotations
 

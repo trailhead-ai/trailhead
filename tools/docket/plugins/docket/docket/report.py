@@ -1,7 +1,9 @@
 """The docket report: every vault's list in vault order, the All view and the finished entries, as one JSON document.
 
-Bare `docket` and `docket report` print it. The report only reads: it takes no lock, never syncs and
-never writes, so bare `docket` is safe to run anywhere, including under a sandbox that forbids writes.
+Bare `docket` and `docket report` print it. Docket itself takes no lock, never syncs and writes no
+docket file to produce it. It calls `lore vault ls` and `lore record show`, and what lore does inside those
+calls (for instance its own journal recovery writes) is lore's behaviour, not docket's. Bare `docket` always runs
+inside the sandbox; there, camp's all-hosts listing fails and the hosts it could not ask are reported unanswered.
 
 Document:
 

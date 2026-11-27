@@ -37,6 +37,9 @@ class FakeLore:
         self.ahead = "0"
         self.dirty = ""
         self.has_upstream = True
+        self.holding_outcome = "holding"
+        self.holding_stderr = "lore: the push did not go through; needs a person\n"
+        self.vault_ls_result = None
 
     def know(self, ref, keywords=()):
         self.records[ref] = list(keywords)
@@ -62,6 +65,8 @@ class FakeLore:
         argv = list(argv)
         self.calls.append(argv)
         if argv[:4] == ["lore", "vault", "ls", "--json"]:
+            if self.vault_ls_result is not None:
+                return completed(argv, *self.vault_ls_result)
             return vault_ls(argv, self.vault_dir)
         if argv[:3] == ["lore", "record", "show"]:
             assert argv[3:5] == ["--json", "--vault"], argv
@@ -82,9 +87,9 @@ class FakeLore:
             if hook:
                 hook(self)
             if self.sync_plan.get(n) == "holding":
-                doc = {"vaults": [{"vault": self.vault, "outcome": "holding"}]}
+                doc = {"vaults": [{"vault": self.vault, "outcome": self.holding_outcome}]}
                 return completed(argv, 1, "  main: Committed: x\n" + json.dumps(doc, indent=2) + "\n",
-                                  "lore: the push did not go through; needs a person\n")
+                                  self.holding_stderr)
             doc = {"vaults": [{"vault": self.vault, "outcome": "published"}]}
             return completed(argv, 0, f"  {self.vault}: Committed: x\n  {self.vault}: Pushed to origin.\n"
                               + json.dumps(doc, indent=2) + "\n")
@@ -690,3 +695,59 @@ class TestWriteLandedThenReReadFails:
         assert (code, doc and doc["outcome"]) == (3, "saved-not-synced")
         assert "docket lock" in doc["sync_warning"]
         assert env.entries() == [*BASE, "task/n1"]
+
+
+class TestRelayedTextCannotBreakOutOfTheDataFence:
+    def _assert_safe(self, text, cap):
+        assert "`" not in text
+        assert all(c.isprintable() for c in text)
+        assert len(text) <= cap
+
+    def test_a_sync_stderr_line_with_control_characters_backticks_and_length_is_cleaned_and_capped(self, env):
+        env.put(DEFAULT, *BASE)
+        env.fake.sync_plan = {0: "holding"}
+        env.fake.holding_stderr = "boom\x1b[31m\x07 ``` after" + "y" * 500 + "\n"
+        code, doc, _ = env.run("add", "--", ref("task/b"))
+        assert (code, doc["outcome"]) == (0, "unchanged")
+        assert "holding" in doc["sync_warning"]
+        assert "boom" in doc["sync_warning"]
+        self._assert_safe(doc["sync_warning"], 400)
+
+    def test_a_lore_supplied_sync_outcome_is_cleaned_and_capped(self, env):
+        env.put(DEFAULT, *BASE)
+        env.fake.sync_plan = {0: "holding"}
+        env.fake.holding_outcome = "odd\x1b[2J```" + "z" * 500
+        code, doc, _ = env.run("add", "--", ref("task/b"))
+        assert (code, doc["outcome"]) == (0, "unchanged")
+        assert "odd" in doc["sync_warning"]
+        self._assert_safe(doc["sync_warning"], 400)
+
+    def test_a_vault_listing_failure_carrying_lore_stderr_is_cleaned_and_capped(self, env):
+        env.fake.vault_ls_result = (1, "", "boom\x1b[31m\x07 ``` after" + "y" * 500 + "\n")
+        code, doc, err = env.run("add", "--", ref("task/n1"))
+        assert (code, doc) == (1, None)
+        assert err.startswith("docket: ") and "boom" in err
+        self._assert_safe(err.strip(), 400)
+
+
+class TestMalformedInputIsACleanFailure:
+    def test_a_deeply_nested_list_file_is_refused_naming_the_file(self, env):
+        env.list_path().parent.mkdir(parents=True)
+        env.list_path().write_text("[" * 200_000)
+        code, doc, _ = env.run("add", "--", ref("task/n1"))
+        assert (code, doc["outcome"]) == (2, "refused")
+        assert str(env.list_path()) in doc["message"]
+        assert env.raw() == b"[" * 200_000
+
+    @pytest.mark.parametrize("result", [
+    (0, '[{"scope": "default", "path": "/vault"}]', ""),
+    (0, '[{"name": "proj", "scope": "default", "path": "/vault"}, 5]', ""),
+    (0, '[{"name": 5, "scope": "default", "path": "/vault"}]', ""),
+    (0, "[" * 100_000, ""),
+])
+    def test_malformed_vault_listing_output_is_a_docket_error(self, env, result):
+        env.fake.vault_ls_result = result
+        code, doc, err = env.run("add", "--", ref("task/n1"))
+        assert (code, doc) == (1, None)
+        assert err.startswith("docket: ")
+        assert "Traceback" not in err

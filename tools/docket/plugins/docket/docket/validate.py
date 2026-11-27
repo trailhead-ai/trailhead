@@ -95,6 +95,8 @@ def configured_vaults(runner: Runner) -> Vaults:
     proc = runner(["lore", "vault", "ls", "--json"])
     path = locate_default_vault(lambda _argv: proc)
     rows = json.loads(proc.stdout)
+    if not all(isinstance(r, dict) and isinstance(r.get("name"), str) for r in rows):
+        raise DocketError("cannot list vaults: lore printed a vault without a name")
     default = next(r["name"] for r in rows if r.get("scope") == "default")
     return Vaults(tuple(r["name"] for r in rows), default, path)
 
