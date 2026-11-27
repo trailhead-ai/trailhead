@@ -233,7 +233,7 @@ def _session(tmp_path_factory, bystander, label, *, cwd="w1", deny_read=True, wi
         settings = render_sandbox_settings(
             dotfiles_checkout(), outpost.state, outpost.port, deny_read=deny_read, gateway=shim_bin / "outpost-gateway"
         )
-        steps = sandbox_steps(outpost.state, bystander, shim_bin / "outpost-gateway")
+        steps = sandbox_steps(outpost.state, bystander, shim_bin / "outpost-gateway", outpost.port)
         session = run_claude_session(
             root,
             label,
@@ -512,7 +512,7 @@ def test_the_rendered_read_denials_name_the_absolute_temp_state_in_double_slash_
 def test_the_rendered_settings_exclude_and_allow_only_the_path_the_session_types(tmp_path):
     wrapper = tmp_path / "shims" / "outpost-gateway"
     settings = render_sandbox_settings(dotfiles_checkout(), tmp_path / "state", 7000, gateway=wrapper)
-    command = sandbox_steps(tmp_path, 7001, wrapper)["run_list"]
+    command = sandbox_steps(tmp_path, 7001, wrapper, 7000)["run_list"]
 
     assert command == f"{wrapper} run list"
     assert f"{wrapper} *" in settings["sandbox"]["excludedCommands"]

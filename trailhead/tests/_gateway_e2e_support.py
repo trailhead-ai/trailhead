@@ -343,7 +343,7 @@ def install_shims(root: Path, outpost: RealOutpost) -> Path:
     )
 
 
-def sandbox_steps(state: Path, other_port: int, gateway: Path) -> dict[str, str]:
+def sandbox_steps(state: Path, other_port: int, gateway: Path, outpost_port: int) -> dict[str, str]:
     """The Bash commands the sandboxed session runs, one tool call each, exactly as written.
 
     None prints a credential: the credential read is redirected to /dev/null, so only its exit status
@@ -357,6 +357,7 @@ def sandbox_steps(state: Path, other_port: int, gateway: Path) -> dict[str, str]
         "credential_read": f'cat "{state}"/sessions/*/gateway-client.json > /dev/null',
         "run_list": f"{gateway} run list",
         "command_route": f"{unix} http://localhost/gateway/runs",
+        "tcp_command_route": f"{probe} http://127.0.0.1:{outpost_port}/gateway/runs",
         "other_loopback_port": f"{probe} http://127.0.0.1:{other_port}/",
         "register_without_authority": f"{unix} {post} http://localhost/gateway/sessions",
     }
@@ -526,11 +527,23 @@ def check_run_list_prints_the_empty_list(facts: Facts, session: Session) -> None
     assert out == f"No runs in workspace {GROUP}/{W1}", f"run list printed {out!r}"
 
 
-def check_proxied_curl_reaches_the_command_route(facts: Facts, session: Session) -> None:  # AC100
-    out = _out(session, "command_route")
-    assert "http=401" in out and "credential_missing" in out, (
-        f"the route did not answer 401 credential_missing: {out!r}"
-    )
+_GATEWAY_ANSWERS = ("credential_missing", "registration_authority_required", "credential_unrecognised")
+
+
+def _assert_refused_by_the_sandbox(out: str, what: str) -> None:
+    """The unix socket is unreachable from the sandbox: curl fails to connect, so nothing came back."""
+    statuses = set(re.findall(r"http=(\d+)", out))
+    assert out.startswith("Exit code") and statuses == {"000"}, f"{what} was not refused by the sandbox: {out!r}"
+    assert not any(answer in out for answer in _GATEWAY_ANSWERS), f"{what} got an answer from the gateway: {out!r}"
+
+
+def check_the_command_route_socket_is_refused_inside_the_sandbox(facts: Facts, session: Session) -> None:  # AC100
+    _assert_refused_by_the_sandbox(_out(session, "command_route"), "the command route over the socket")
+
+
+def check_the_command_route_is_not_served_over_tcp(facts: Facts, session: Session) -> None:  # AC100
+    out = _out(session, "tcp_command_route")
+    assert "http=404" in out and "gateway_not_on_tcp" in out, f"the route was not refused over TCP: {out!r}"
 
 
 def check_proxied_curl_to_another_loopback_port_is_refused(facts: Facts, session: Session) -> None:  # AC100
@@ -538,18 +551,18 @@ def check_proxied_curl_to_another_loopback_port_is_refused(facts: Facts, session
     assert "http=403" in out, f"the proxy did not refuse the other port: {out!r}"
 
 
-def check_registering_without_the_authority_is_refused(facts: Facts, session: Session) -> None:  # AC16, AC17, AC18
-    out = _out(session, "register_without_authority")
-    assert "http=401" in out and "registration_authority_required" in out, f"registration was not refused: {out!r}"
+def check_registering_over_the_socket_is_refused_inside_the_sandbox(facts: Facts, session: Session) -> None:  # AC16, AC17, AC18
+    _assert_refused_by_the_sandbox(_out(session, "register_without_authority"), "registration over the socket")
 
 
 CHECKS = [
     check_hook_registered_the_session_for_w1,
     check_credential_file_read_is_refused,
     check_run_list_prints_the_empty_list,
-    check_proxied_curl_reaches_the_command_route,
+    check_the_command_route_socket_is_refused_inside_the_sandbox,
+    check_the_command_route_is_not_served_over_tcp,
     check_proxied_curl_to_another_loopback_port_is_refused,
-    check_registering_without_the_authority_is_refused,
+    check_registering_over_the_socket_is_refused_inside_the_sandbox,
 ]
 
 

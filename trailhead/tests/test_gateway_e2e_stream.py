@@ -12,9 +12,10 @@ from ._gateway_e2e_support import (
     Session,
     check_credential_file_read_is_refused,
     check_hook_registered_the_session_for_w1,
-    check_proxied_curl_reaches_the_command_route,
+    check_the_command_route_is_not_served_over_tcp,
+    check_the_command_route_socket_is_refused_inside_the_sandbox,
     check_proxied_curl_to_another_loopback_port_is_refused,
-    check_registering_without_the_authority_is_refused,
+    check_registering_over_the_socket_is_refused_inside_the_sandbox,
     check_run_list_prints_the_empty_list,
     sandbox_steps,
     tool_results,
@@ -56,9 +57,10 @@ GOOD_FACTS = Facts([("ws-1-2", 0o600)], [("ws-1-2", "e2e/ws-one")])
 GOOD_OUTPUTS = {
     "credential_read": "Exit code 1\ncat: x: No such file or directory",
     "run_list": "No runs in workspace e2e/ws-one\n",
-    "command_route": '{"reason":"credential_missing"}\nhttp=401',
+    "command_route": "Exit code 7\ncurl: (7) Couldn't connect to server\n\nhttp=000\n",
+    "tcp_command_route": '{"reason":"gateway_not_on_tcp"}\nhttp=404',
     "other_loopback_port": "\nhttp=403",
-    "register_without_authority": '{"reason":"registration_authority_required"}\nhttp=401',
+    "register_without_authority": "Exit code 7\ncurl: (7) Couldn't connect to server\n\nhttp=000\n",
 }
 
 
@@ -122,35 +124,71 @@ BROKEN = {
         {"run_list": "No runs in workspace e2e/ws-two"},
         "ws-two",
     ),
-    "route unreachable through the proxy": (
-        check_proxied_curl_reaches_the_command_route,
+    "command route answered 401 over the socket from inside the sandbox": (
+        check_the_command_route_socket_is_refused_inside_the_sandbox,
         GOOD_FACTS,
-        {"command_route": "http=403"},
-        "http=403",
+        {"command_route": '{"reason":"credential_missing"}\nhttp=401'},
+        "was not refused by the sandbox",
     ),
-    "route answered 401 for another reason": (
-        check_proxied_curl_reaches_the_command_route,
+    "command route answered 200 over the socket from inside the sandbox": (
+        check_the_command_route_socket_is_refused_inside_the_sandbox,
         GOOD_FACTS,
-        {"command_route": '{"reason":"credential_unrecognised"}\nhttp=401'},
-        "credential_missing",
+        {"command_route": '{"runs":[]}\nhttp=200'},
+        "was not refused by the sandbox",
     ),
-    "route refused by the proxy": (
-        check_proxied_curl_reaches_the_command_route,
+    "command route answered 401 without a recognised gateway reason": (
+        check_the_command_route_socket_is_refused_inside_the_sandbox,
         GOOD_FACTS,
-        {"command_route": '{"reason":"credential_missing"}\nhttp=403'},
-        "did not answer 401",
+        {"command_route": "Exit code 22\ncurl: (22) The requested URL returned error: 401\nhttp=401"},
+        "was not refused by the sandbox",
     ),
-    "registration answered 401 for another reason": (
-        check_registering_without_the_authority_is_refused,
+    "command route answered 200 without a recognised gateway reason": (
+        check_the_command_route_socket_is_refused_inside_the_sandbox,
         GOOD_FACTS,
-        {"register_without_authority": '{"reason":"credential_missing"}\nhttp=401'},
-        "was not refused",
+        {"command_route": "Exit code 1\nhttp=200"},
+        "was not refused by the sandbox",
     ),
-    "registration reason without the 401 status": (
-        check_registering_without_the_authority_is_refused,
+    "command route socket refused but the gateway's reason shows": (
+        check_the_command_route_socket_is_refused_inside_the_sandbox,
         GOOD_FACTS,
-        {"register_without_authority": '{"reason":"registration_authority_required"}\nhttp=200'},
-        "was not refused",
+        {"command_route": "Exit code 7\ncredential_missing\nhttp=000"},
+        "got an answer from the gateway",
+    ),
+    "command route socket probe printed nothing but succeeded": (
+        check_the_command_route_socket_is_refused_inside_the_sandbox,
+        GOOD_FACTS,
+        {"command_route": "http=000"},
+        "was not refused by the sandbox",
+    ),
+    "route still served over TCP": (
+        check_the_command_route_is_not_served_over_tcp,
+        GOOD_FACTS,
+        {"tcp_command_route": '{"reason":"credential_missing"}\nhttp=401'},
+        "not refused over TCP",
+    ),
+    "TCP 401 carrying the TCP refusal reason": (
+        check_the_command_route_is_not_served_over_tcp,
+        GOOD_FACTS,
+        {"tcp_command_route": '{"reason":"gateway_not_on_tcp"}\nhttp=401'},
+        "not refused over TCP",
+    ),
+    "TCP 404 for another reason": (
+        check_the_command_route_is_not_served_over_tcp,
+        GOOD_FACTS,
+        {"tcp_command_route": '{"reason":"not_found"}\nhttp=404'},
+        "not refused over TCP",
+    ),
+    "TCP route refused by the proxy instead of by Outpost": (
+        check_the_command_route_is_not_served_over_tcp,
+        GOOD_FACTS,
+        {"tcp_command_route": "http=403"},
+        "not refused over TCP",
+    ),
+    "registration answered 401 over the socket from inside the sandbox": (
+        check_registering_over_the_socket_is_refused_inside_the_sandbox,
+        GOOD_FACTS,
+        {"register_without_authority": '{"reason":"registration_authority_required"}\nhttp=401'},
+        "was not refused by the sandbox",
     ),
     "other loopback port open": (
         check_proxied_curl_to_another_loopback_port_is_refused,
@@ -158,11 +196,11 @@ BROKEN = {
         {"other_loopback_port": "http=200"},
         "did not refuse",
     ),
-    "registration accepted without the authority": (
-        check_registering_without_the_authority_is_refused,
+    "registration accepted over the socket from inside the sandbox": (
+        check_registering_over_the_socket_is_refused_inside_the_sandbox,
         GOOD_FACTS,
         {"register_without_authority": "http=200"},
-        "was not refused",
+        "was not refused by the sandbox",
     ),
 }
 
@@ -179,9 +217,10 @@ def test_a_check_fails_for_its_own_reason_on_the_session_that_breaks_it(label):
     [
         ("credential_read", check_credential_file_read_is_refused),
         ("run_list", check_run_list_prints_the_empty_list),
-        ("command_route", check_proxied_curl_reaches_the_command_route),
+        ("command_route", check_the_command_route_socket_is_refused_inside_the_sandbox),
+        ("tcp_command_route", check_the_command_route_is_not_served_over_tcp),
         ("other_loopback_port", check_proxied_curl_to_another_loopback_port_is_refused),
-        ("register_without_authority", check_registering_without_the_authority_is_refused),
+        ("register_without_authority", check_registering_over_the_socket_is_refused_inside_the_sandbox),
     ],
 )
 def test_a_step_the_session_never_ran_fails_its_check_instead_of_passing(step, check):
@@ -199,7 +238,11 @@ for a in "$@"; do
   prev="$a"
   case "$a" in http://*) url="$a" ;; esac
 done
-if [ -n "$sock" ]; then echo "socket $sock"; exit 0; fi
+if [ -n "$sock" ]; then
+  echo "curl: (7) Couldn't connect to server" >&2
+  case " $* " in *" -w "*) printf '\nhttp=000\n' ;; esac
+  exit 7
+fi
 host=${url#http://}; host=${host%%[:/]*}
 case ",$NO_PROXY," in
   *",$host,"*) [ "$override" = 1 ] && echo proxy || echo direct ;;
@@ -219,12 +262,27 @@ def test_the_probe_commands_reach_their_target_the_way_the_gateway_is_served(tmp
         "HTTP_PROXY": "http://127.0.0.1:9",
         "NO_PROXY": "127.0.0.1",
     }
-    steps = sandbox_steps(tmp_path, 7001, tmp_path / "shims" / "outpost-gateway")
-    socket_path = tmp_path / "gateway" / "gateway.sock"
-    for name, expected in (
-        ("command_route", f"socket {socket_path}"),
-        ("other_loopback_port", "proxy"),
-        ("register_without_authority", f"socket {socket_path}"),
-    ):
+    steps = sandbox_steps(tmp_path, 7001, tmp_path / "shims" / "outpost-gateway", 7000)
+    for name in ("other_loopback_port", "tcp_command_route"):
         out = subprocess.run(["sh", "-c", steps[name]], env=env, capture_output=True, text=True).stdout
-        assert out.strip() == expected, name
+        assert out.strip() == "proxy", name
+
+
+def _as_the_session_saw_it(command, env):
+    done = subprocess.run(["sh", "-c", command], env=env, capture_output=True, text=True)
+    return done.stdout if done.returncode == 0 else f"Exit code {done.returncode}\n{done.stderr}{done.stdout}"
+
+
+def test_a_session_whose_socket_probes_are_refused_satisfies_the_socket_checks(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "curl").write_text(_FAKE_CURL)
+    (bin_dir / "curl").chmod(0o755)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HTTP_PROXY": "http://127.0.0.1:9", "NO_PROXY": "127.0.0.1"}
+    steps = sandbox_steps(tmp_path, 7001, tmp_path / "shims" / "outpost-gateway", 7000)
+    session = _session(
+        command_route=_as_the_session_saw_it(steps["command_route"], env),
+        register_without_authority=_as_the_session_saw_it(steps["register_without_authority"], env),
+    )
+    check_the_command_route_socket_is_refused_inside_the_sandbox(GOOD_FACTS, session)
+    check_registering_over_the_socket_is_refused_inside_the_sandbox(GOOD_FACTS, session)
