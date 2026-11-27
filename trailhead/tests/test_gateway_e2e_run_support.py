@@ -26,6 +26,7 @@ from ._gateway_e2e_support import (
     EngineUnavailable,
     NotTheRunnerEngine,
     act_container_names,
+    outpost_serves_gateway_socket,
     act_process_lines,
     HomeSentinel,
     build_fixture_repo,
@@ -694,3 +695,15 @@ def test_listing_on_any_other_socket_is_refused_before_a_request_is_sent(socket_
     with pytest.raises(NotTheRunnerEngine):
         act_container_names(socket_path, request=request)
     assert calls == []
+
+
+def test_a_checkout_with_the_gateway_socket_source_is_waited_on_for_its_socket(tmp_path):
+    (tmp_path / "server" / "gateway").mkdir(parents=True)
+    (tmp_path / "server" / "gateway" / "socket.ts").write_text("export {};\n")
+    assert outpost_serves_gateway_socket(tmp_path) is True
+
+
+def test_a_checkout_from_before_the_gateway_socket_is_not_waited_on_for_one(tmp_path):
+    (tmp_path / "server" / "gateway").mkdir(parents=True)
+    (tmp_path / "server" / "index.ts").write_text("export {};\n")
+    assert outpost_serves_gateway_socket(tmp_path) is False

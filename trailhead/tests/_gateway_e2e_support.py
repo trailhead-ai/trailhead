@@ -150,6 +150,11 @@ class RealOutpost:
         return sorted((self.state / "sessions").glob("*/gateway-client.json"))
 
 
+def outpost_serves_gateway_socket(checkout: Path) -> bool:
+    """Whether the Outpost checkout serves the gateway on a unix socket; one from before that has only TCP."""
+    return (checkout / "server" / "gateway" / "socket.ts").is_file()
+
+
 def _health_ok(port: int) -> bool:
     try:
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
@@ -167,7 +172,7 @@ def real_outpost(
     """A real Outpost: ``node --import tsx server/index.ts`` on a free port, temp state, temp camp layout.
 
     Its state folder is a short one (the gateway socket path under it has to fit in a socket address). Waits for
-    ``/health``, the registration authority file and the gateway socket, failing early if the process exits.
+    ``/health``, the registration authority file and, when the checkout serves one, the gateway socket, failing early if the process exits.
     With *runs*, its config is the operator's (so its ``[runs]`` is theirs) and it also waits for the engine
     filter's socket, which that table makes it bind. *extra_env* is added to the Outpost process's environment.
     """
@@ -199,10 +204,12 @@ def real_outpost(
         # A checkout from before the engine filter has no filter to wait for.
         has_filter = runs is not None and (checkout / "server" / "runs" / "engine-filter.ts").is_file()
         filter_sock = runs.runs_folder / "filter.sock" if has_filter else None
+        # A checkout from before the gateway socket answers on TCP only.
+        has_socket = outpost_serves_gateway_socket(checkout)
         while not (
             _health_ok(port)
             and (state / "registration" / "credential").exists()
-            and gateway_socket_path(state).exists()
+            and (not has_socket or gateway_socket_path(state).exists())
             and (filter_sock is None or filter_sock.exists())
         ):
             if proc.poll() is not None:
