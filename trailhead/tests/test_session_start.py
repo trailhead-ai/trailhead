@@ -1021,7 +1021,7 @@ def test_cli_maps_launch_account_default_and_declared_to_the_env_binding(
 
 # -- git administrative files under the lore state root ----------------------
 
-_GIT_ADMIN = ("config", "hooks", "info")
+_GIT_ADMIN = ("config", "hooks", "info", "config.worktree")
 
 
 def _admin(git_dir) -> list[str]:
@@ -1041,7 +1041,8 @@ def _vault_denials(env) -> list[str]:
 
 
 def _later_vault_globs(env) -> list[str]:
-    return _admin(f"{_hub_roots(env)[1]}/**/.git")
+    lore = _hub_roots(env)[1]
+    return _admin(f"{lore}/**/.git") + _admin(f"{lore}/**/.git/modules/**")
 
 
 def _planted_patterns(env) -> list[str]:
@@ -1049,8 +1050,41 @@ def _planted_patterns(env) -> list[str]:
     return [
         entry
         for root in (home, lore)
-        for entry in (f"{root}/**/.claude", f"{root}/**/.mcp.json", *_admin(f"{root}/**/.git"))
+        for entry in (
+            f"{root}/**/.claude",
+            f"{root}/**/.mcp.json",
+            *_admin(f"{root}/**/.git"),
+            *_admin(f"{root}/**/.git/modules/**"),
+            *_admin(f"{root}/**/*.git"),
+        )
     ]
+
+
+def _make_git_dir(path: Path) -> Path:
+    (path / "objects").mkdir(parents=True)
+    (path / "HEAD").write_text("ref: refs/heads/main\n")
+    return path
+
+
+def test_a_submodule_git_dir_inside_a_vault_has_its_admin_files_denied(tmp_path):
+    env = _fence(tmp_path)
+    vault = _make_vault(_hub_roots(env)[1], "one")
+    sub = _make_git_dir(vault / ".git" / "modules" / "sub")
+    deep = _make_git_dir(sub / "modules" / "deep")
+    assert set(_admin(sub) + _admin(deep)) <= set(_deny_of(env))
+
+
+def test_a_bare_git_dir_beside_the_vaults_has_its_admin_files_denied(tmp_path):
+    env = _fence(tmp_path)
+    bare = _make_git_dir(Path(_hub_roots(env)[1]) / "stores" / "origin.git")
+    assert set(_admin(bare)) <= set(_deny_of(env))
+
+
+def test_a_directory_named_like_a_git_dir_but_not_one_is_not_denied_concretely(tmp_path):
+    env = _fence(tmp_path)
+    fake = Path(_hub_roots(env)[1]) / "stores" / "notes.git"
+    fake.mkdir(parents=True)
+    assert not [d for d in _deny_of(env) if d.startswith(f"{fake}/")]
 
 
 def test_a_planted_mcp_json_is_denied_under_every_writable_root_but_the_cache(tmp_path):
@@ -1075,7 +1109,7 @@ def test_each_vault_gets_its_config_hooks_and_info_denied(tmp_path):
     assert not any(d.startswith(f"{one}/record") for d in denied)
 
 
-def test_a_single_vault_adds_exactly_its_three_entries(tmp_path):
+def test_a_single_vault_adds_exactly_its_admin_entries(tmp_path):
     env = _fence(tmp_path)
     one = _make_vault(_hub_roots(env)[1], "one")
     assert set(_vault_denials(env)) == set(_admin(one / ".git")) | set(_later_vault_globs(env))

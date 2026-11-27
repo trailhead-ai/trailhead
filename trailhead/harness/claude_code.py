@@ -1475,7 +1475,7 @@ def _refuse_helper_code_under_write_roots(
                     )
 
 
-_GIT_ADMIN_NAMES = ("config", "hooks", "info")
+_GIT_ADMIN_NAMES = ("config", "hooks", "info", "config.worktree")
 _GIT_SCAN_DEPTH = 3
 _GITDIR_POINTER_LIMIT = 4096
 
@@ -1544,6 +1544,17 @@ def _git_admin_denials(guarded: list[Path], writable: list[Path]) -> list[str]:
             for name in _GIT_ADMIN_NAMES:
                 add(git_dir / name)
 
+    def is_git_dir(path: Path) -> bool:
+        return (path / "HEAD").is_file() and (path / "objects").is_dir()
+
+    def add_submodule_dirs(git_dir: Path) -> None:
+        for current, dirnames, _ in os.walk(git_dir / "modules"):
+            here = Path(current)
+            if is_git_dir(here):
+                add_admin(here)
+            if len(here.relative_to(git_dir).parts) >= 2 * _GIT_SCAN_DEPTH:
+                dirnames[:] = []
+
     for root in guarded:
         for current, dirnames, _ in os.walk(root):
             here = Path(current)
@@ -1554,9 +1565,13 @@ def _git_admin_denials(guarded: list[Path], writable: list[Path]) -> list[str]:
                 if git_dir != dot_git:
                     add(dot_git)
                 add_admin(git_dir)
+                add_submodule_dirs(git_dir)
                 common = _common_dir_of(git_dir)
                 if common is not None:
                     add_admin(common)
+                    add_submodule_dirs(common)
+            if here.name.endswith(".git") and is_git_dir(here):
+                add_admin(here)
             dirnames[:] = [] if depth >= _GIT_SCAN_DEPTH else [d for d in dirnames if d != ".git"]
     return found
 
@@ -1567,8 +1582,8 @@ def _planted_folder_patterns(writable: list[Path]) -> list[str]:
     Under each root given (a profile's workspace, vault and hub-home roots, never its cache root, where
     tools legitimately clone repositories), at any depth: the ``.claude`` folder (harness settings, hooks and
     skills the operator's tools later load), the ``.mcp.json`` file (project MCP servers the operator's settings may
-    pre-enable by name) and the ``config``, ``hooks`` and ``info`` of a
-    ``.git`` folder (a planted filter or hook later runs unsandboxed). The rest of ``.git``
+    pre-enable by name) and the ``config``, ``config.worktree``, ``hooks`` and ``info`` of a
+    ``.git`` folder, of a submodule git directory under ``.git/modules`` and of a bare or separate ``*.git`` directory (a planted filter or hook later runs unsandboxed). The rest of ``.git``
     stays writable so a vault can still be committed to. Folders and vaults that exist when the
     profile resolves are also named concretely (see :func:`_git_admin_denials`); a sandbox that
     does not honour a glob falls back on that list, one that does covers what is created later.
@@ -1581,6 +1596,8 @@ def _planted_folder_patterns(writable: list[Path]) -> list[str]:
             f"{root}/**/.claude",
             f"{root}/**/.mcp.json",
             *(f"{root}/**/.git/{n}" for n in _GIT_ADMIN_NAMES),
+            *(f"{root}/**/.git/modules/**/{n}" for n in _GIT_ADMIN_NAMES),
+            *(f"{root}/**/*.git/{n}" for n in _GIT_ADMIN_NAMES),
         ):
             if entry not in found:
                 found.append(entry)
