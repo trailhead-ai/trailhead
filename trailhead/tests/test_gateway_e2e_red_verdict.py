@@ -60,6 +60,15 @@ def test_each_failure_must_carry_one_of_the_signals_when_asked():
     xml = _junit(failures=["invalid choice: 'cancel'", "boom"], passed=["test_no_secret_or_token"])
     ok, text = red_verdict(xml, "", expect_fail=2, markers=("invalid choice: 'cancel'",), per_failure=True, allow_pass=("no_secret_or_token",))
     assert not ok and "t_fail1" in text
+    assert "2 failures" in text and "0 errors" in text
+
+
+@pytest.mark.parametrize("where", ["message", "text"])
+def test_a_failure_carries_its_signal_in_either_its_message_or_its_body(where):
+    signal = "invalid choice: 'cancel'"
+    body = {"message": f'message={quoteattr(signal)}>body', "text": f'message="short">{escape(signal)}'}[where]
+    xml = f'<testsuites><testsuite><testcase name="t_a"><failure {body}</failure></testcase></testsuite></testsuites>'
+    assert red_verdict(xml, "", expect_fail=1, markers=(signal,), per_failure=True) == (True, "red valid")
 
 
 def test_a_passing_test_that_is_not_allowed_to_pass_is_invalid_when_each_failure_is_checked():
