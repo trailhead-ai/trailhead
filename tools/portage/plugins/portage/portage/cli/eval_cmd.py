@@ -21,9 +21,10 @@ step. Exit 0 every case passed, 1 a case failed, 3 none failed and one not run, 
 (the command to wait again is printed), 2 refused: an identifier that is not ``local-`` plus 12
 lowercase letters or digits (never read as a path), an unknown request, or a bound outside 1..540.
 
-With no ``--backend``, a call whose environment carries ``SANDBOX_RUNTIME`` (the harness sets it in
-sandboxed calls only) is not run ``could-not-leave-sandbox``: nothing starts, exit 3, and the block is
-followed by the absolute pinned-shim command to run outside the sandbox. ``--backend local`` runs
+With no ``--backend``, a call the sandbox detector (``portage.eval_gate.sandbox.is_sandboxed``, which reads
+what the sandbox does to Outpost's credential folders, never an environment variable) finds inside the
+sandbox is not run ``could-not-leave-sandbox``: nothing starts, exit 3, and the block is followed by the
+command to run from a host terminal. ``--backend local`` runs
 regardless, but a worker started that way from inside the sandbox is killed when the call returns and
 ``wait`` reports it ``could-not-leave-sandbox``; with no marker the local backend is the default.
 
@@ -41,6 +42,7 @@ import sys
 from pathlib import Path, PurePosixPath
 
 from ..eval_command import local, request
+from ..eval_gate import sandbox as gate_sandbox
 from ..eval_gate.loads import LoadError, cached, derive, tree_reader
 from ..eval_gate.mapping import CASE_NAME, MappingError, _q, derived_names, load_mapping, valid_corpus_path
 from ..eval_gate.select import MAPPING_NAME
@@ -128,17 +130,15 @@ def _plan(args: argparse.Namespace) -> tuple[Path, str, list[dict], dict[str, tu
 
 def _leave_sandbox(args: argparse.Namespace) -> int:
     request.print_not_run_block(request.COULD_NOT_LEAVE_SANDBOX)
+    print("this call runs inside the sandbox, which hides Outpost's credentials from eval; "
+          "run eval from a host terminal (outside any Claude Code session)")
     shim = request.shim_from_env()
-    if shim:
-        print("cause: this call ran inside the sandbox even though it went through the pinned shim; "
-              "the sandbox exclusion for it is probably not installed on this host "
-              "(run `chezmoi apply` and start a new session)")
-    else:
+    if not shim:
         shim = request.default_shim()
         if not (shim and os.path.isfile(shim) and os.access(shim, os.X_OK)):
-            print("the pinned portage-eval shim is not installed on this host, so there is no command to run "
-                  "outside the sandbox; run `trailhead update` with `claude` on PATH, then `chezmoi apply` "
-                  "and start a new session")
+            print("the pinned portage-eval shim is not installed on this host, so there is no command to run; "
+                  "run `trailhead update` with `claude` on PATH, then `chezmoi apply` "
+                  "and run eval from a host terminal")
             return 3
     words = [shim, "start"]
     if args.require_version is not None:
@@ -148,7 +148,7 @@ def _leave_sandbox(args: argparse.Namespace) -> int:
         words += ["--case", case]
     if args.repo is not None:
         words += ["--repo", os.path.abspath(args.repo)]
-    print(f"run outside the sandbox: {' '.join(shlex.quote(w) for w in words)}")
+    print(f"run from a host terminal: {' '.join(shlex.quote(w) for w in words)}")
     return 3
 
 
@@ -169,7 +169,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         required = int(args.require_version)
         if required > request.EVAL_COMMAND_VERSION:
             return _too_old(required)
-    if args.backend is None and "SANDBOX_RUNTIME" in os.environ:
+    if args.backend is None and gate_sandbox.is_sandboxed():
         return _leave_sandbox(args)
     try:
         repo, root, cases, derived = _plan(args)

@@ -30,6 +30,7 @@ from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 from portage.cli import dispatch
 from portage.eval_core import execute
 from portage.eval_command import local, request
+from portage.eval_gate import sandbox as gate_sandbox
 
 FIXTURES = Path(__file__).parent / "fixtures" / "eval_runner"
 ID = re.compile(r"^local-[a-z0-9]{12}$")
@@ -765,14 +766,56 @@ class TestRequestInterface:
 SHIM = "/home/someone/.local/state/trailhead/bin/portage-eval"
 
 
+def _mountinfo(ws, monkeypatch, *masked):
+    outpost = ws.home / ".local" / "state" / "outpost"
+    lines = [f"{i} 1 0:{i} / {outpost / name} rw,nosuid - tmpfs tmpfs rw" for i, name in enumerate(masked, 40)]
+    path = ws.home / "mountinfo"
+    path.write_text("\n".join(["1 0 8:1 / / rw - xfs /dev/sda1 rw", *lines]) + "\n")
+    monkeypatch.setattr(gate_sandbox, "MOUNTINFO", path)
+
+
+def _in_sandbox(ws, monkeypatch):
+    _mountinfo(ws, monkeypatch, "operator", "registration", "sessions", "db")
+
+
+def _outside_sandbox(ws, monkeypatch):
+    _mountinfo(ws, monkeypatch)
+
+
 class TestBackendChoice:
+    def test_a_sandbox_the_detector_sees_stops_start_and_tells_the_operator_to_use_a_host_terminal(
+            self, ws, monkeypatch):
+        _in_sandbox(ws, monkeypatch)
+        monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
+        rc, out, _ = ws.main(*self._argv(ws))
+        assert rc == 3
+        assert "not run: could-not-leave-sandbox" in out.splitlines()
+        assert "host terminal" in out
+        assert f"{SHIM} start --plugin plugins/p --case c1 --case c2 --repo {ws.repo}" in out
+        assert "chezmoi apply" not in out and "outside the sandbox" not in out
+        assert ws.count("canary-started") == 0
+
+    def test_the_sandbox_marker_variable_alone_does_not_stop_start(self, ws, monkeypatch):
+        _outside_sandbox(ws, monkeypatch)
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        rc, out, err = ws.main(*self._argv(ws))
+        assert rc == 0, (out, err)
+        assert "request:" in out
+
+    def test_without_the_marker_a_sandbox_the_detector_sees_still_stops_start(self, ws, monkeypatch):
+        _in_sandbox(ws, monkeypatch)
+        monkeypatch.delenv("SANDBOX_RUNTIME", raising=False)
+        rc, out, _ = ws.main(*self._argv(ws))
+        assert rc == 3
+        assert "not run: could-not-leave-sandbox" in out.splitlines()
+
     def _argv(self, ws, *extra):
         return ["eval", "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1",
                 "--case", "c2", *extra]
 
     def test_the_sandbox_marker_with_no_backend_is_not_run_could_not_leave_sandbox_and_starts_nothing(
             self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         rc, out, err = ws.main(*self._argv(ws))
         assert rc == 3, (out, err)
         assert "not run: could-not-leave-sandbox" in out.splitlines()
@@ -789,23 +832,22 @@ class TestBackendChoice:
         assert rc == 0 and "case c1: pass" in out
 
     def test_an_explicit_local_backend_runs_even_with_the_sandbox_marker(self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         request_id = ws.started("c1")
         rc, out, _ = ws.wait(request_id)
         assert rc == 0 and "case c1: pass" in out
 
     def test_through_the_shim_the_message_names_the_cause_and_the_expanded_shim_command(self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
         rc, out, _ = ws.main(*self._argv(ws))
         assert rc == 3
         assert "next step: stop and report" in out.splitlines()
-        assert "chezmoi apply" in out and "new session" in out
         assert f"{SHIM} start --plugin plugins/p --case c1 --case c2 --repo {ws.repo}" in out
 
     def test_not_through_the_shim_with_the_default_shim_installed_prints_the_paste_ready_command(
             self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         monkeypatch.delenv("PORTAGE_EVAL_SHIM", raising=False)
         default = ws.home / ".local" / "state" / "trailhead" / "bin" / "portage-eval"
         default.parent.mkdir(parents=True)
@@ -813,13 +855,13 @@ class TestBackendChoice:
         default.chmod(0o755)
         rc, out, _ = ws.main(*self._argv(ws))
         assert rc == 3
-        expected = f"run outside the sandbox: {default} start --plugin plugins/p --case c1 --case c2 --repo {ws.repo}"
+        expected = f"run from a host terminal: {default} start --plugin plugins/p --case c1 --case c2 --repo {ws.repo}"
         assert expected in out
         assert "not installed" not in out
 
     def test_not_through_the_shim_with_no_default_shim_says_it_is_not_installed_and_names_no_command(
             self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         monkeypatch.delenv("PORTAGE_EVAL_SHIM", raising=False)
         missing = ws.home / ".local" / "state" / "trailhead" / "bin" / "portage-eval"
         assert not missing.exists()
@@ -828,23 +870,23 @@ class TestBackendChoice:
         assert "not run: could-not-leave-sandbox" in out.splitlines()
         assert "next step: stop and report" in out.splitlines()
         assert "not installed" in out and "trailhead update" in out
-        assert "claude" in out and "chezmoi apply" in out and "new session" in out
-        assert "run outside the sandbox:" not in out
+        assert "claude" in out and "host terminal" in out
+        assert "run from a host terminal:" not in out
         assert str(missing) not in out
 
     def test_a_default_shim_that_is_not_an_executable_file_is_treated_as_not_installed(
             self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         monkeypatch.delenv("PORTAGE_EVAL_SHIM", raising=False)
         default = ws.home / ".local" / "state" / "trailhead" / "bin" / "portage-eval"
         default.parent.mkdir(parents=True)
         default.write_text("#!/bin/sh\nexit 0\n")
         default.chmod(0o644)
         _, out, _ = ws.main(*self._argv(ws))
-        assert "not installed" in out and "run outside the sandbox:" not in out
+        assert "not installed" in out and "run from a host terminal:" not in out
 
     def test_a_shim_path_with_a_space_is_quoted_in_the_command_to_paste(self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         monkeypatch.setenv("PORTAGE_EVAL_SHIM", "/home/a b/bin/portage-eval")
         _, out, _ = ws.main(*self._argv(ws))
         assert "'/home/a b/bin/portage-eval' start --plugin plugins/p" in out
@@ -852,7 +894,7 @@ class TestBackendChoice:
     @pytest.mark.parametrize("bad", ["portage-eval", "relative/portage-eval", "/x/y\nz", ""])
     def test_a_shim_path_that_is_not_absolute_or_has_a_control_character_is_not_named(
             self, ws, monkeypatch, bad):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         monkeypatch.setenv("PORTAGE_EVAL_SHIM", bad)
         rc, out, _ = ws.main(*self._argv(ws))
         assert rc == 3
@@ -933,7 +975,7 @@ class TestRequireVersion:
 
     def test_with_the_sandbox_marker_a_too_high_version_is_too_old_not_could_not_leave_sandbox(
             self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         rc, out, err = ws.main(*self._argv(ws, str(request.EVAL_COMMAND_VERSION + 1)))
         assert rc == 3, (out, err)
         assert "not run: eval-command-too-old" in out.splitlines()
@@ -941,27 +983,27 @@ class TestRequireVersion:
         self._nothing_created(ws)
 
     def test_with_the_sandbox_marker_a_satisfied_version_is_still_could_not_leave_sandbox(self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         rc, out, _ = ws.main(*self._argv(ws, str(request.EVAL_COMMAND_VERSION)))
         assert rc == 3
         assert "not run: could-not-leave-sandbox" in out.splitlines()
 
     @pytest.mark.parametrize("version", ["1", "2", "001"])
     def test_the_printed_outside_the_sandbox_command_carries_the_required_version(self, ws, monkeypatch, version):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
         rc, out, _ = ws.main(*self._argv(ws, version, "--case", "c2"))
         assert rc == 3
-        assert (f"run outside the sandbox: {SHIM} start --require-version {int(version)} --plugin plugins/p "
+        assert (f"run from a host terminal: {SHIM} start --require-version {int(version)} --plugin plugins/p "
                 f"--case c1 --case c2 --repo {ws.repo}") in out.splitlines()
 
     def test_the_printed_outside_the_sandbox_command_has_no_version_flag_when_none_was_given(self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
         monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
         rc, out, _ = ws.main("eval", "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1")
         assert rc == 3
-        printed = [line for line in out.splitlines() if line.startswith("run outside the sandbox:")]
-        assert printed == [f"run outside the sandbox: {SHIM} start --plugin plugins/p --case c1 --repo {ws.repo}"]
+        printed = [line for line in out.splitlines() if line.startswith("run from a host terminal:")]
+        assert printed == [f"run from a host terminal: {SHIM} start --plugin plugins/p --case c1 --repo {ws.repo}"]
 
 
 class TestNextStepFor:
@@ -1001,7 +1043,7 @@ class TestPinnedShimEndToEnd:
         build_cli_shims(resolve_cli_tools({"portage": True}), env=env)
         return resolve_shim_dir(env=env) / "portage-eval"
 
-    def _run(self, shim, ws, *argv, marker=True):
+    def _run(self, shim, ws, *argv, marker=False):
         import subprocess
 
         env = {"HOME": str(ws.home), "PATH": "/usr/bin:/bin"}
@@ -1033,13 +1075,22 @@ class TestPinnedShimEndToEnd:
         assert waited.returncode == 0, (waited.stdout, waited.stderr)
         assert _recorded(ws, "c1")["files"]["skills/x.md"] == "edited after the commit"
 
-    def test_the_shim_with_the_sandbox_marker_and_no_backend_tells_the_session_to_stop(self, ws, tmp_path):
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 folder")
+    def test_the_shim_with_a_credential_folder_the_sandbox_refuses_and_no_backend_tells_the_session_to_stop(
+            self, ws, tmp_path):
         shim = self._shim(ws, tmp_path)
-        proc = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1")
+        denied = ws.home / ".local" / "state" / "outpost" / "sessions"
+        denied.mkdir(parents=True)
+        denied.chmod(0)
+        try:
+            proc = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1",
+                             marker=False)
+        finally:
+            denied.chmod(0o700)
         assert proc.returncode == 3, (proc.stdout, proc.stderr)
         assert "not run: could-not-leave-sandbox" in proc.stdout
         assert f"{shim} start --plugin plugins/p --case c1 --repo {ws.repo}" in proc.stdout
-        assert "chezmoi apply" in proc.stdout
+        assert "host terminal" in proc.stdout
         assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
 
     def test_the_shim_with_a_too_high_required_version_reports_too_old(self, ws, tmp_path):
