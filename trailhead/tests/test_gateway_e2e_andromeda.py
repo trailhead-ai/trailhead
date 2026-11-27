@@ -148,14 +148,14 @@ def fake_runs(world):
         "h1",
         camp.w1,
         [
-            ("register", register_cmd(port)),
-            ("list", list_cmd(port, root)),
-            ("register_from_w2", f'cd "{camp.w2}" && {register_cmd(port)}'),
-            ("list_after_w2", list_cmd(port, root)),
+            ("register", register_cmd()),
+            ("list", list_cmd(root)),
+            ("register_from_w2", f'cd "{camp.w2}" && {register_cmd()}'),
+            ("list_after_w2", list_cmd(root)),
         ],
         env,
     )
-    h2 = run_fake_harness(root, "h2", camp.elsewhere, [("register", register_cmd(port))], env)
+    h2 = run_fake_harness(root, "h2", camp.elsewhere, [("register", register_cmd())], env)
     return h1, h2
 
 
@@ -313,7 +313,7 @@ def _denial_session(tmp_path_factory, label, *, kind, deny_read=True):
     camp = make_camp(root)
     with real_outpost(root, camp) as outpost:
         env = step_env(root, outpost)
-        run_fake_harness(root, "other-session", camp.w2, [("register", register_cmd(outpost.port))], env)
+        run_fake_harness(root, "other-session", camp.w2, [("register", register_cmd())], env)
         [other] = outpost.credential_files()
         other_key = other.parent.name
         shim_bin = install_shims(root, outpost)
@@ -629,7 +629,7 @@ def run_world(tmp_path_factory):
                 "w2",
                 camp.w2 / "app",
                 [
-                    ("register", register_cmd(port)),
+                    ("register", register_cmd()),
                     ("list_before", _gw(gateway, "run", "list")),
                     ("view_w1_run", _gw(gateway, "run", "view", str(first_id))),
                     ("watch_w1_run", _gw(gateway, "run", "watch", str(first_id))),
@@ -644,7 +644,7 @@ def run_world(tmp_path_factory):
                 "w2b",
                 camp.w2 / "app",
                 [
-                    ("register", register_cmd(port)),
+                    ("register", register_cmd()),
                     ("watch_own", _gw(gateway, "run", "watch", own_id, "--exit-status")),
                     ("list_after", _gw(gateway, "run", "list")),
                 ],
@@ -655,7 +655,7 @@ def run_world(tmp_path_factory):
                 "w1x",
                 camp.w1 / "app",
                 [
-                    ("register", register_cmd(port)),
+                    ("register", register_cmd()),
                     ("view_w2_run", _gw(gateway, "run", "view", own_id)),
                     ("list", _gw(gateway, "run", "list", "--json")),
                 ],
@@ -965,7 +965,7 @@ def cancel_world(tmp_path_factory):
 
             def gw(cwd, *argv):
                 """Run one gateway command from a fresh harness in *cwd*; its output, ending ``rc=<n>``."""
-                steps = [("register", register_cmd(port)), ("cmd", _gw(gateway, *argv))]
+                steps = [("register", register_cmd()), ("cmd", _gw(gateway, *argv))]
                 return run_fake_harness(root, f"h{next(n)}", cwd, steps, env)["cmd"]
 
             w1 = camp.w1 / "app"

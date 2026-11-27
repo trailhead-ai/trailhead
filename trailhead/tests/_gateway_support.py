@@ -1,7 +1,7 @@
 """Shared fixtures for tests of the Outpost gateway commands.
 
-``StubOutpost`` is a loopback stand-in for the Outpost routes the gateway
-commands call; ``run_under_harness`` runs a shell command as a child of a fake
+``StubOutpost`` is a stand-in for the Outpost routes the gateway
+commands call, served on the unix socket Outpost serves them on (``<state>/gateway/gateway.sock``); ``run_under_harness`` runs a shell command as a child of a fake
 harness process, so the command finds a real harness ancestor and a real session
 key; ``run_gateway_runner`` uses it to run ``_gateway_runner.py`` and returns what
 the command printed. The ``*_cmd`` builders are the shell commands that run the two
@@ -15,8 +15,10 @@ import json
 import os
 import shlex
 import socket
+import socketserver
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -45,13 +47,62 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+def gateway_socket_path(state: Path) -> Path:
+    """Where the client looks for Outpost's gateway socket when Outpost's state folder is *state*."""
+    return state / "gateway" / "gateway.sock"
+
+
+def _socket_folder(state: Path) -> Path:
+    folder = gateway_socket_path(state).parent
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    folder.chmod(0o700)
+    return folder
+
+
 @contextmanager
-def silent_listener() -> Iterator[int]:
-    """A loopback port that accepts connections (the kernel completes them) and never answers one."""
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
+def silent_socket(state: Path) -> Iterator[Path]:
+    """The gateway socket of *state*, accepting connections (the kernel completes them) and never answering one."""
+    _socket_folder(state)
+    path = gateway_socket_path(state)
+    with socket.socket(socket.AF_UNIX) as s:
+        s.bind(str(path))
         s.listen(16)
-        yield s.getsockname()[1]
+        try:
+            yield path
+        finally:
+            path.unlink(missing_ok=True)
+
+
+def stale_socket(state: Path) -> Path:
+    """A socket file at the gateway path that nothing listens on, as a stopped Outpost leaves behind."""
+    _socket_folder(state)
+    path = gateway_socket_path(state)
+    with socket.socket(socket.AF_UNIX) as s:
+        s.bind(str(path))
+    return path
+
+
+@contextmanager
+def tcp_squatter() -> Iterator[socket.socket]:
+    """A TCP listener on the port Outpost's cockpit uses, as a squatting process would hold it; nothing it is sent is
+    read, but ``accept`` (half a second's wait) shows whether anything connected."""
+    import pytest
+
+    from trailhead.outpost_lifecycle import DAEMON_PORT
+
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", DAEMON_PORT))
+        except OSError:
+            pytest.skip(f"127.0.0.1:{DAEMON_PORT} is in use on this host, so a squatter cannot be set up")
+        s.listen(8)
+        s.settimeout(0.5)
+        yield s
+
+
+def short_state_dir() -> Path:
+    """A fresh folder whose gateway socket path fits in a socket address (about 100 bytes)."""
+    return Path(tempfile.mkdtemp(prefix="gw-"))
 
 
 def runner_env(
@@ -65,37 +116,14 @@ def runner_env(
     return env
 
 
-def register_port_interpreter(directory: Path, port: int, repo_root: Path = REPO_ROOT) -> Path:
-    """An interpreter for install to pin that aims the registration step at *port*.
-
-    The pinned shims start their interpreter isolated, from an empty environment, so no
-    variable the session sets can retarget them; a test pins this stand-in instead (patch
-    ``trailhead.pathint.sys.executable`` while building the shims). It requires the
-    ``-I -S`` the shim passes, drops them so ``_register_port/sitecustomize.py`` loads, and
-    runs this test interpreter on the shim's script.
-    """
-    directory.mkdir(parents=True, exist_ok=True)
-    interpreter = directory / "register-port-python"
-    interpreter.write_text(
-        "#!/bin/sh\n"
-        '[ "$1" = -I ] && [ "$2" = -S ] || { echo "not started isolated: $*" >&2; exit 97; }\n'
-        "shift 2\n"
-        f'PYTHONPATH="{Path(__file__).with_name("_register_port")}" '
-        f'TRAILHEAD_TEST_REGISTER_PORT="{port}" TRAILHEAD_TEST_REPO_ROOT="{repo_root}" '
-        f'exec "{sys.executable}" "$@"\n'
-    )
-    interpreter.chmod(0o755)
-    return interpreter
+def gateway_runner_cmd(env_dump: Path, argv: list[str]) -> str:
+    """Shell command running the gateway command, dumping its environment to *env_dump*."""
+    return shlex.join([sys.executable, str(GATEWAY_RUNNER), str(env_dump), *argv])
 
 
-def gateway_runner_cmd(port: int, env_dump: Path, argv: list[str]) -> str:
-    """Shell command running the gateway command against *port*, dumping its environment to *env_dump*."""
-    return shlex.join([sys.executable, str(GATEWAY_RUNNER), str(port), str(env_dump), *argv])
-
-
-def register_runner_cmd(port: int, argv: list[str]) -> str:
-    """Shell command running the ``trailhead`` CLI with the registration step aimed at *port*."""
-    return shlex.join([sys.executable, str(REGISTER_RUNNER), str(port), *argv])
+def register_runner_cmd(argv: list[str]) -> str:
+    """Shell command running the ``trailhead`` CLI."""
+    return shlex.join([sys.executable, str(REGISTER_RUNNER), *argv])
 
 
 def run_under_harness(
@@ -134,6 +162,15 @@ class Seen:
     raw: bytes = b""
 
 
+class _UnixHTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_UNIX
+    daemon_threads = True
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "outpost", 0
+
+
 @dataclass
 class StubOutpost:
     """Loopback Outpost: issues TOKEN for the right client, serves ``runs`` for TOKEN.
@@ -153,10 +190,13 @@ class StubOutpost:
     writes the session's credential file there); ``register_delay`` and ``token_delay`` hold those two
     answers back that many seconds. With ``token_uses`` set, each exchange issues a fresh token that is
     accepted for that many authorised calls and then refused as ``expiry_reason`` (``credential_expired`` unless set).
+    ``state`` is Outpost's state folder (default: the test process's ``OUTPOST_STATE_DIR``); the stub serves
+    ``<state>/gateway/gateway.sock``.
     ``release`` is set
     on exit so no waiting step outlives the stub.
     """
 
+    state: Path | None = None
     workspace: str = "trailhead/outpost-gateway"
     runs: list[dict] = field(default_factory=list)
     client_id: str = CLIENT_ID
@@ -346,8 +386,11 @@ class StubOutpost:
                 if self._authorised():
                     self._send(200, {"workspace": stub.workspace, "runs": stub.runs})
 
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.port = self._server.server_address[1]
+        if self.state is None:
+            self.state = Path(os.environ["OUTPOST_STATE_DIR"])
+        _socket_folder(self.state)
+        self.socket_path = gateway_socket_path(self.state)
+        self._server = _UnixHTTPServer(str(self.socket_path), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     def __enter__(self) -> "StubOutpost":
@@ -358,6 +401,7 @@ class StubOutpost:
         self.release.set()
         self._server.shutdown()
         self._server.server_close()
+        self.socket_path.unlink(missing_ok=True)
 
 
 def write_credential(
@@ -414,7 +458,6 @@ def run_gateway_runner(
     argv: list[str],
     *,
     state_dir: Path,
-    port: int,
     seed: Callable[[str], None] | None = None,
     extra_env: dict[str, str] | None = None,
     scratch: Path,
@@ -434,7 +477,7 @@ def run_gateway_runner(
 
     done = run_under_harness(
         launcher,
-        gateway_runner_cmd(port, env_dump, argv),
+        gateway_runner_cmd(env_dump, argv),
         env=runner_env(state_dir, extra=extra_env),
         on_start=started,
     )

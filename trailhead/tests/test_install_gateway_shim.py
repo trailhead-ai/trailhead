@@ -510,18 +510,18 @@ class TestInstalledShimOnItsOwnState:
     """The installed shims against a stub Outpost, run as a child of a fake harness with nothing but what the session
     sets."""
 
-    def _install(self, trusted_checkout, tmp_path, monkeypatch, port):
-        from trailhead.tests._gateway_support import register_port_interpreter
+    def _install(self, trusted_checkout, tmp_path, request):
+        import shutil
 
-        outpost_state = tmp_path / "baked-outpost-state"
+        from trailhead.tests._gateway_support import short_state_dir
+
+        outpost_state = short_state_dir()
+        request.addfinalizer(lambda: shutil.rmtree(outpost_state, ignore_errors=True))
         env = {
             "HOME": str(tmp_path / "home"),
             "TRAILHEAD_STATE_DIR": str(tmp_path / "baked-trailhead-state"),
             "OUTPOST_STATE_DIR": str(outpost_state),
         }
-        monkeypatch.setattr(
-            "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", port))
-        )
         build_gateway_shims(_tools(), env=env, checkout=trusted_checkout)
         return env, outpost_state
 
@@ -537,14 +537,14 @@ class TestInstalledShimOnItsOwnState:
         )
 
     def test_a_credential_planted_as_a_link_under_a_folder_the_session_names_is_never_read(
-        self, trusted_checkout, tmp_path, monkeypatch
+        self, trusted_checkout, tmp_path, request
     ):
         # AC82: no session can read another session's credential.
         from trailhead.harness.process import format_session_key
         from trailhead.tests._gateway_support import StubOutpost, await_harness, write_credential
 
-        with StubOutpost(runs=[]) as stub:
-            env, outpost_state = self._install(trusted_checkout, tmp_path, monkeypatch, stub.port)
+        env, outpost_state = self._install(trusted_checkout, tmp_path, request)
+        with StubOutpost(outpost_state, runs=[]) as stub:
             planted = tmp_path / "planted-outpost-state"
 
             def seed(pid):
@@ -571,7 +571,7 @@ class TestInstalledShimOnItsOwnState:
         assert [q.headers["authorization"] for q in tokens] == [basic_auth(CLIENT_ID, CLIENT_SECRET)]
 
     def test_a_session_with_no_credential_registers_on_demand_through_the_installed_shim_with_a_scrubbed_env(
-        self, trusted_checkout, tmp_path, monkeypatch
+        self, trusted_checkout, tmp_path, request
     ):
         # AC28: on-demand registration, proven through the real installed shim.
         from trailhead.tests._gateway_support import (
@@ -581,10 +581,8 @@ class TestInstalledShimOnItsOwnState:
             write_credential,
         )
 
-        holder = []
-        with StubOutpost(runs=[], on_register=lambda key: write_credential(holder[0], key)) as stub:
-            env, outpost_state = self._install(trusted_checkout, tmp_path, monkeypatch, stub.port)
-            holder.append(outpost_state)
+        env, outpost_state = self._install(trusted_checkout, tmp_path, request)
+        with StubOutpost(outpost_state, runs=[], on_register=lambda key: write_credential(outpost_state, key)) as stub:
             write_authority(outpost_state)
             proc = self._run_under_harness(
                 tmp_path,

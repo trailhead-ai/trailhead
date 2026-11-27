@@ -46,9 +46,9 @@ from ._gateway_support import (
     REPO_ROOT,
     free_port,
     gateway_runner_cmd,
-    register_port_interpreter,
     register_runner_cmd,
     runner_env,
+    short_state_dir,
 )
 from ._harness_process_support import make_fake_harness
 from ._trusted_checkout import build_gateway_shims, make_trusted_checkout
@@ -166,13 +166,14 @@ def real_outpost(
 ) -> Iterator[RealOutpost]:
     """A real Outpost: ``node --import tsx server/index.ts`` on a free port, temp state, temp camp layout.
 
-    Waits for ``/health`` and the registration authority file, failing early if the process exits.
+    Its state folder is a short one (the gateway socket path under it has to fit in a socket address). Waits for
+    ``/health``, the registration authority file and the gateway socket, failing early if the process exits.
     With *runs*, its config is the operator's (so its ``[runs]`` is theirs) and it also waits for the engine
     filter's socket, which that table makes it bind. *extra_env* is added to the Outpost process's environment.
     """
     checkout = outpost_checkout()
     port, sites_port = free_port(), free_port()
-    state = root / "outpost-state"
+    state = short_state_dir()
     home = root / "outpost-home"
     home.mkdir()
     log = root / "outpost.log"
@@ -201,6 +202,7 @@ def real_outpost(
         while not (
             _health_ok(port)
             and (state / "registration" / "credential").exists()
+            and (state / "gateway" / "gateway.sock").exists()
             and (filter_sock is None or filter_sock.exists())
         ):
             if proc.poll() is not None:
@@ -218,6 +220,7 @@ def real_outpost(
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+        shutil.rmtree(state, ignore_errors=True)
 
 
 def step_env(root: Path, outpost: RealOutpost) -> dict[str, str]:
@@ -263,12 +266,12 @@ def start_fake_harness(root: Path, name: str, cwd: Path, script: str, env: dict[
     )
 
 
-def register_cmd(port: int) -> str:
-    return register_runner_cmd(port, ["gateway", "register"])
+def register_cmd() -> str:
+    return register_runner_cmd(["gateway", "register"])
 
 
-def list_cmd(port: int, scratch: Path) -> str:
-    return gateway_runner_cmd(port, scratch / "env-after.json", ["run", "list"])
+def list_cmd(scratch: Path) -> str:
+    return gateway_runner_cmd(scratch / "env-after.json", ["run", "list"])
 
 
 # --- a real sandboxed claude session ----------------------------------------------------------------
@@ -324,24 +327,25 @@ def install_shims(root: Path, outpost: RealOutpost, *, port: int | None = None) 
     ``trailhead-gateway-register`` shims into a temp trailhead state folder, from a trusted copy of the
     trailhead checkout, with the state folders baked in (so Outpost's state is ``outpost.state``, as the real
     install bakes the operator's). The shims run the real gateway command and the real hook's registration
-    step. Both fix Outpost's port, so the shims are pinned to ``register_port_interpreter``, a stand-in that
-    aims them at *port* (Outpost's, unless a ``TokenRecorder`` stands in front of it); nothing else about them
-    is replaced.
+    step. Both reach Outpost on the gateway socket under the baked Outpost state folder, so nothing about them is
+    replaced. A ``TokenRecorder`` relays TCP and cannot stand in front of that socket, so a *port* for one to
+    aim the shims at is refused.
     """
+    if port is not None:
+        raise AssertionError(
+            "the gateway shims speak to Outpost's unix socket, which a TCP TokenRecorder cannot stand in front of"
+        )
     env = {
         "TRAILHEAD_STATE_DIR": str(root / "trailhead-state"),
         "OUTPOST_STATE_DIR": str(outpost.state),
         "HOME": str(root / "outpost-home"),
     }
     checkout = trailhead_checkout()
-    interpreter = register_port_interpreter(root / "interp", port or outpost.port, checkout)
-    with mock.patch("trailhead.pathint.sys.executable", str(interpreter)):
-        shim_dir = build_gateway_shims(
-            resolve_cli_tools({"camp": True, "lore": True, "portage": True}),
-            env=env,
-            checkout=make_trusted_checkout(root / "trusted-checkout", checkout),
-        )
-    return shim_dir
+    return build_gateway_shims(
+        resolve_cli_tools({"camp": True, "lore": True, "portage": True}),
+        env=env,
+        checkout=make_trusted_checkout(root / "trusted-checkout", checkout),
+    )
 
 
 def sandbox_steps(state: Path, port: int, other_port: int, gateway: Path) -> dict[str, str]:
@@ -1109,7 +1113,7 @@ def stream_script(port: int, gateway: Path) -> str:
     """
     gw = shlex.quote(str(gateway))
     return (
-        f"{register_cmd(port)} >/dev/null 2>&1; "
+        f"{register_cmd()} >/dev/null 2>&1; "
         f"t0=$(date +%s.%N); id=$({gw} run start slow 2>/dev/null); rc=$?; t1=$(date +%s.%N); "
         'echo "@@start rc=$rc id=$id t0=$t0 t1=$t1"; '
         f'{gw} run watch "$id" | while IFS= read -r l; do echo "@@line $(date +%s.%N) $l"; done; '

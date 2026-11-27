@@ -46,7 +46,6 @@ from trailhead.gateway.private_file import Unsafe, read_private_file
 from trailhead.harness import harness_cwd, session_key
 from trailhead.launch_profile import WorkspaceError, workspace_containing
 from trailhead.outpost_lifecycle import APP as OUTPOST_APP
-from trailhead.outpost_lifecycle import DAEMON_PORT
 from trailhead.paths import state_dir
 
 STATES = ("queued", "in_progress", "completed")
@@ -112,13 +111,15 @@ def _read_credential(key: str) -> tuple[str, str]:
     return client_id, client_secret
 
 
-def _register(port: int) -> str:
+def _register() -> str:
     """Register this session through the registration step; its key, or the error saying why it is not registered."""
     try:
-        return register.register(port=port, timeout=None)
+        return register.register(timeout=None)
     except register.Refused as refusal:
         if refusal.reason == register.OUTPOST_UNREACHABLE:
-            raise outpost_http.OutpostUnreachable(port) from None
+            raise outpost_http.OutpostUnreachable(outpost_http.socket_path()) from None
+        if refusal.reason == register.SOCKET_NOT_REACHABLE:
+            raise outpost_http.SocketNotReachable(outpost_http.socket_path()) from None
         if refusal.reason == "not_in_workspace":
             raise _fail(register.NO_GATEWAY_OUTSIDE_WORKSPACE) from None
         next_step = refusal.message or register.NEXT_STEPS.get(refusal.reason)
@@ -126,39 +127,38 @@ def _register(port: int) -> str:
         raise _fail(f"this session is not registered: {_clean(refusal.reason)}{suffix}") from None
 
 
-def _credential(key: str, port: int) -> tuple[str, str]:
+def _credential(key: str) -> tuple[str, str]:
     """The session's client id and secret, registering the session first when it has none."""
     try:
         return _read_credential(key)
     except _NoCredential:
         pass
-    key = _register(port)
+    key = _register()
     try:
         return _read_credential(key)
     except _NoCredential:
         raise _fail("this session registered but Outpost left it no gateway credential") from None
 
 
-def gateway_token(port: int) -> str:
+def gateway_token() -> str:
     """A fresh broker bearer token for this session: its credential read (the session registered first if it has
     none) and exchanged. The one place a credential becomes a token."""
     key = session_key()
     if key is None:
         raise CommandError(SANDBOXED)
-    client_id, client_secret = _credential(key, port)
+    client_id, client_secret = _credential(key)
     try:
-        return _exchange(client_id, client_secret, port)
+        return _exchange(client_id, client_secret)
     except outpost_http.ReplyTimedOut:
-        raise outpost_http.OutpostUnreachable(port) from None
+        raise outpost_http.OutpostUnreachable(outpost_http.socket_path()) from None
 
 
-def _exchange(client_id: str, client_secret: str, port: int) -> str:
+def _exchange(client_id: str, client_secret: str) -> str:
     reply = outpost_http.request(
         "POST",
         "/broker/token",
         headers={"Authorization": outpost_http.basic_auth(client_id, client_secret)},
         form={"grant_type": "client_credentials"},
-        port=port,
     )
     token = reply.body.get("access_token")
     if reply.status == 200 and isinstance(token, str) and token:
@@ -177,36 +177,35 @@ class _Gateway:
     """The gateway as one session sees it: a bearer token, replaced once when Outpost refuses it as expired or as
     replaced by a newer one (it keeps only a few live tokens per client)."""
 
-    def __init__(self, port: int) -> None:
-        self.port = port
+    def __init__(self) -> None:
         outpost_http.start_reach_budget()
-        self.token = gateway_token(port)
+        self.token = gateway_token()
 
     @staticmethod
     def _expired(reply: outpost_http.Reply | None) -> bool:
         return reply is not None and reply.status == 401 and reply.body.get("reason") in STALE_TOKEN_REASONS
 
     def request(self, method: str, path: str, **kwargs) -> outpost_http.Reply:
-        reply = outpost_http.request(method, path, headers=_bearer(self.token), port=self.port, **kwargs)
+        reply = outpost_http.request(method, path, headers=_bearer(self.token), **kwargs)
         if not self._expired(reply):
             outpost_http.reached()
             return reply
-        self.token = gateway_token(self.port)
+        self.token = gateway_token()
         body_file = kwargs.get("body_file")
         if body_file is not None:
             body_file[0].seek(0)
-        reply = outpost_http.request(method, path, headers=_bearer(self.token), port=self.port, **kwargs)
+        reply = outpost_http.request(method, path, headers=_bearer(self.token), **kwargs)
         outpost_http.reached()
         return reply
 
     def open_stream(self, path: str) -> outpost_http.Stream:
-        stream = outpost_http.open_stream(path, headers=_bearer(self.token), port=self.port)
+        stream = outpost_http.open_stream(path, headers=_bearer(self.token))
         if not self._expired(stream.refusal):
             outpost_http.reached()
             return stream
         stream.close()
-        self.token = gateway_token(self.port)
-        stream = outpost_http.open_stream(path, headers=_bearer(self.token), port=self.port)
+        self.token = gateway_token()
+        stream = outpost_http.open_stream(path, headers=_bearer(self.token))
         outpost_http.reached()
         return stream
 
@@ -292,8 +291,8 @@ def _matrix_text(matrix: object) -> str:
     return ", ".join(f"{_one_line(str(k))}={_one_line(str(v))}" for k, v in matrix.items())
 
 
-def _run_list(as_json: bool, port: int) -> int:
-    listing = _list_runs(_Gateway(port))
+def _run_list(as_json: bool) -> int:
+    listing = _list_runs(_Gateway())
     if as_json:
         print(_clean(json.dumps({"workspace": listing["workspace"], "runs": listing["runs"]}, indent=2)))
     elif not listing["runs"]:
@@ -308,8 +307,8 @@ def _print_fields(fields: tuple[tuple[str, object], ...]) -> None:
         print(f"{name + ':':<9} {_cell(value)}")
 
 
-def _run_view(run_id: int, port: int) -> int:
-    run = _get_view(_Gateway(port), run_id)
+def _run_view(run_id: int) -> int:
+    run = _get_view(_Gateway(), run_id)
     _print_fields((
         ("id", run_id),
         ("state", run["state"]),
@@ -327,8 +326,8 @@ def _emit(line: bytes) -> None:
     sys.stdout.buffer.write(_clean(line.decode(errors="replace")).encode())
 
 
-def _run_view_log(run_id: int, port: int) -> int:
-    gateway = _Gateway(port)
+def _run_view_log(run_id: int) -> int:
+    gateway = _Gateway()
     run = _get_view(gateway, run_id)
     if run["state"] == "queued":
         print(f"outpost-gateway: run {run_id} has not started, so it has no log yet", file=sys.stderr)
@@ -351,8 +350,8 @@ def _run_view_log(run_id: int, port: int) -> int:
     return 0
 
 
-def _run_cancel(run_id: int, port: int) -> int:
-    gateway = _Gateway(port)
+def _run_cancel(run_id: int) -> int:
+    gateway = _Gateway()
     try:
         reply = gateway.request("POST", f"/gateway/runs/{run_id}/cancel", timeout=CANCEL_TIMEOUT_SECONDS)
     except outpost_http.ReplyTimedOut:
@@ -367,8 +366,8 @@ def _run_cancel(run_id: int, port: int) -> int:
     return 0
 
 
-def _run_watch(run_id: int, exit_status: bool, port: int) -> int:
-    gateway = _Gateway(port)
+def _run_watch(run_id: int, exit_status: bool) -> int:
+    gateway = _Gateway()
     written = 0
     while True:
         run = None
@@ -421,7 +420,7 @@ def _session_workspace() -> Path:
         raise _fail(register.NO_GATEWAY_OUTSIDE_WORKSPACE) from None
 
 
-def _run_start(job: str, workflow: str | None, port: int, scratch_home: Path | None) -> int:
+def _run_start(job: str, workflow: str | None, scratch_home: Path | None) -> int:
     try:
         with tree_upload.top_level(Path(os.curdir), home=scratch_home) as tree:
             workspace = _session_workspace()
@@ -440,7 +439,7 @@ def _run_start(job: str, workflow: str | None, port: int, scratch_home: Path | N
     with spool:
         size = spool.tell()
         spool.seek(0)
-        reply = _Gateway(port).request(
+        reply = _Gateway().request(
             "POST",
             f"/gateway/runs?{urlencode({'workflow': workflow, 'job': job})}",
             body_file=(spool, size, "application/x-tar"),
@@ -509,35 +508,35 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _dispatch(args: argparse.Namespace, port: int, scratch_home: Path | None) -> int:
+def _dispatch(args: argparse.Namespace, scratch_home: Path | None) -> int:
     if args.action == "start":
-        return _run_start(args.job, args.workflow, port, scratch_home)
+        return _run_start(args.job, args.workflow, scratch_home)
     if args.action == "watch":
-        return _run_watch(args.id, args.exit_status, port)
+        return _run_watch(args.id, args.exit_status)
     if args.action == "view":
-        return _run_view_log(args.id, port) if args.log else _run_view(args.id, port)
+        return _run_view_log(args.id) if args.log else _run_view(args.id)
     if args.action == "cancel":
-        return _run_cancel(args.id, port)
-    return _run_list(args.json, port)
+        return _run_cancel(args.id)
+    return _run_list(args.json)
 
 
 def _report(err: Exception) -> None:
     if isinstance(err, CommandError):
         print(err, file=sys.stderr)
     elif isinstance(err, outpost_http.OutpostUnreachable):
-        print(
-            _fail(f"Outpost is unreachable at {outpost_http.DAEMON_HOST}:{err.port}; is it running?"), file=sys.stderr
-        )
+        print(_fail(f"Outpost is unreachable at {err.path}; is it running?"), file=sys.stderr)
+    elif isinstance(err, outpost_http.SocketNotReachable):
+        print(_fail(f"Outpost's socket at {err.path} is not reachable from here (permission denied)"), file=sys.stderr)
     else:
         print(f"outpost-gateway: unexpected failure ({type(err).__name__})", file=sys.stderr)
 
 
-def main(argv: list[str] | None = None, *, port: int = DAEMON_PORT, scratch_home: Path | None = None) -> int:
+def main(argv: list[str] | None = None, *, scratch_home: Path | None = None) -> int:
     """*scratch_home* is where ``run start`` makes its private upload folder; the default
     is the operator's home from the password database."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        return _dispatch(args, port, scratch_home)
+        return _dispatch(args, scratch_home)
     except Exception as err:  # noqa: BLE001 — a traceback must never carry credential material
         _report(err)
         return 2
@@ -545,12 +544,12 @@ def main(argv: list[str] | None = None, *, port: int = DAEMON_PORT, scratch_home
         outpost_http.reached()
 
 
-def auth_header_main(argv: list[str] | None = None, *, port: int = DAEMON_PORT) -> int:
+def auth_header_main(argv: list[str] | None = None) -> int:
     """The headersHelper entry: print the session's ``Authorization`` header as JSON, or ``{}`` and the reason on
     stderr, and exit 0 whatever happens. Takes no arguments (any given are ignored)."""
     try:
         with outpost_http.reach_budget():
-            print(json.dumps({"Authorization": f"Bearer {gateway_token(port)}"}))
+            print(json.dumps({"Authorization": f"Bearer {gateway_token()}"}))
     except Exception as err:  # noqa: BLE001 — a traceback must never carry credential material
         _report(err)
         print("{}")

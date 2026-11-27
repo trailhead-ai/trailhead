@@ -3,8 +3,10 @@ removed by uninstall, and its script finds and runs the trailhead CLI."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -20,10 +22,9 @@ from trailhead.tests._gateway_support import (
     await_harness,
     REGISTRATION_AUTHORITY,
     StubOutpost,
-    register_port_interpreter,
     run_under_harness,
-    silent_listener,
-    free_port,
+    short_state_dir,
+    silent_socket,
     write_authority,
 )
 from trailhead.tests._harness_process_support import make_fake_harness
@@ -285,24 +286,28 @@ class TestUninstall:
         assert not (plugin / "hooks" / "hooks.json").exists()
 
 
+def _short_state(request) -> Path:
+    """Outpost's state folder, short enough that the gateway socket path under it fits in a socket address."""
+    d = short_state_dir()
+    request.addfinalizer(lambda: shutil.rmtree(d, ignore_errors=True))
+    return d
+
+
 class TestRealInstallReachesOutpost:
-    def test_the_hook_registers_through_the_shim_install_wrote(self, tmp_path, monkeypatch):
+    def test_the_hook_registers_through_the_shim_install_wrote(self, tmp_path, request):
         state = tmp_path / "state"
         env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
-        outpost_state = tmp_path / "outpost-state"
+        outpost_state = _short_state(request)
         env = {**env, "OUTPOST_STATE_DIR": str(outpost_state)}
         write_authority(outpost_state)
         launcher = make_fake_harness(tmp_path / "fake")
         dest = tmp_path / "plugins" / "outpost"
         _compose("outpost", dest)
         found = []
-        with StubOutpost() as stub:
-            monkeypatch.setattr(
-                "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", stub.port))
-            )
-            build_gateway_shims(
-                resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout")
-            )
+        build_gateway_shims(
+            resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout")
+        )
+        with StubOutpost(outpost_state) as stub:
             proc = run_under_harness(
                 launcher,
                 str(dest / "hooks" / "gateway-register"),
@@ -325,64 +330,62 @@ class TestNoCredentialThroughTheInstalledHook:
     """The hook as `trailhead install` wires it: the plugin's script, the shim install wrote, a stub or absent
     Outpost."""
 
-    def _run(self, tmp_path, monkeypatch, port, *, authority=True):
+    def _run(self, tmp_path, request, *, stand_in=None, authority=True):
+        """The hook run with Outpost's state folder as the *stand_in* (a callable given that folder, returning a context
+        manager that serves its gateway socket) sees it; with none, nothing serves the socket."""
         state = tmp_path / "state"
         env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
-        outpost_state = tmp_path / "outpost-state"
+        outpost_state = _short_state(request)
         env = {**env, "OUTPOST_STATE_DIR": str(outpost_state)}
         if authority:
             write_authority(outpost_state)
         dest = tmp_path / "plugins" / "outpost"
         _compose("outpost", dest)
-        monkeypatch.setattr(
-            "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", port))
-        )
         build_gateway_shims(
             resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout")
         )
         started = time.monotonic()
-        proc = run_under_harness(
-            make_fake_harness(tmp_path / "fake"),
-            str(dest / "hooks" / "gateway-register"),
-            env={
-                **env,
-                "OUTPOST_STATE_DIR": str(outpost_state),
-                "PATH": os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"]),
-            },
-            on_start=lambda pid: None,
-            stdin="{}",
-        )
+        with (stand_in or (lambda _: contextlib.nullcontext()))(outpost_state):
+            proc = run_under_harness(
+                make_fake_harness(tmp_path / "fake"),
+                str(dest / "hooks" / "gateway-register"),
+                env={
+                    **env,
+                    "OUTPOST_STATE_DIR": str(outpost_state),
+                    "PATH": os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"]),
+                },
+                on_start=lambda pid: None,
+                stdin="{}",
+            )
         return proc, time.monotonic() - started, state / "gateway" / "register.log"
 
-    def test_a_closed_port_exits_zero_within_two_seconds_with_the_line(self, tmp_path, monkeypatch):
-        proc, elapsed, log = self._run(tmp_path, monkeypatch, free_port())
+    def test_no_socket_exits_zero_within_two_seconds_with_the_line(self, tmp_path, request):
+        proc, elapsed, log = self._run(tmp_path, request)
         assert proc.returncode == 0, proc.stderr
         message = _one_message(proc)
         assert "it will register on the first gateway call once Outpost is back" in message
         assert log.read_text().rstrip("\n").endswith(f" {message}")
         assert elapsed < 2.0, elapsed
 
-    def test_a_port_that_accepts_and_never_answers_exits_zero_within_two_seconds_with_the_line(
-        self, tmp_path, monkeypatch
+    def test_a_socket_that_accepts_and_never_answers_exits_zero_within_two_seconds_with_the_line(
+        self, tmp_path, request
     ):
-        with silent_listener() as port:
-            proc, elapsed, log = self._run(tmp_path, monkeypatch, port)
+        proc, elapsed, log = self._run(tmp_path, request, stand_in=silent_socket)
         assert proc.returncode == 0, proc.stderr
         assert "once Outpost is back" in _one_message(proc)
         assert elapsed < 2.0, elapsed
 
-    def test_a_refusal_prints_outposts_reason_and_next_step(self, tmp_path, monkeypatch):
+    def test_a_refusal_prints_outposts_reason_and_next_step(self, tmp_path, request):
         reply = (403, {"reason": "host_not_allowed", "message": "Open it on the host."})
-        with StubOutpost(register_reply=reply) as stub:
-            proc, _, log = self._run(tmp_path, monkeypatch, stub.port)
+        proc, _, log = self._run(tmp_path, request, stand_in=lambda st: StubOutpost(st, register_reply=reply))
         assert proc.returncode == 0, proc.stderr
         message = _one_message(proc)
         assert "host_not_allowed" in message and "Open it on the host." in message
         assert log.read_text().rstrip("\n").endswith(f" {message}")
 
-    def test_outside_a_camp_workspace_says_so(self, tmp_path, monkeypatch):
-        with StubOutpost(register_reply=(422, {"reason": "not_in_workspace", "message": "x"})) as stub:
-            proc, _, _ = self._run(tmp_path, monkeypatch, stub.port)
+    def test_outside_a_camp_workspace_says_so(self, tmp_path, request):
+        refusal = (422, {"reason": "not_in_workspace", "message": "x"})
+        proc, _, _ = self._run(tmp_path, request, stand_in=lambda st: StubOutpost(st, register_reply=refusal))
         assert proc.returncode == 0, proc.stderr
         assert "not in a camp workspace" in _one_message(proc)
 
@@ -458,21 +461,18 @@ class TestToolServerEntry:
         assert json.loads(proc.stdout) == {}
 
     def test_after_a_real_install_the_header_helper_prints_the_session_s_token_and_nothing_else(
-        self, tmp_path, monkeypatch
+        self, tmp_path, request
     ):
         state = tmp_path / "state"
-        outpost_state = tmp_path / "outpost-state"
+        outpost_state = _short_state(request)
         env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path), "OUTPOST_STATE_DIR": str(outpost_state)}
         dest = tmp_path / "plugins" / "outpost"
         _compose("outpost", dest)
         found = []
-        with StubOutpost() as stub:
-            monkeypatch.setattr(
-                "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", stub.port))
-            )
-            build_gateway_shims(
-                resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout")
-            )
+        build_gateway_shims(
+            resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout")
+        )
+        with StubOutpost(outpost_state) as stub:
             proc = run_under_harness(
                 make_fake_harness(tmp_path / "fake"),
                 _header_helper_command(dest),

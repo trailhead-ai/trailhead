@@ -5,7 +5,7 @@ Run from the Outpost plugin's SessionStart hook (``--hook``) through the pinned
 register``. Everything it imports is stdlib or trailhead, so it runs on the isolated
 interpreter that shim starts. It finds the harness
 process that owns it through the harness seam, reads the registration authority
-from Outpost's state directory, and posts ``{pid, start_time}`` to Outpost, which
+from Outpost's state directory, and posts ``{pid, start_time}`` to Outpost over its gateway socket, which
 derives the workspace itself. Nothing is taken from the caller: no argument,
 environment variable or hook input names a process, workspace or session key.
 
@@ -32,10 +32,8 @@ from trailhead.gateway import outpost_http
 from trailhead.gateway.private_file import Unsafe, read_private_file
 from trailhead.harness import format_session_key, harness_process
 from trailhead.outpost_lifecycle import APP as OUTPOST_APP
-from trailhead.outpost_lifecycle import DAEMON_PORT
 from trailhead.paths import state_dir
 
-PORT = DAEMON_PORT
 TIMEOUT_SECONDS = 1.5
 HOOK_TIMEOUT_SECONDS = 1.0
 """What the SessionStart hook allows Outpost to answer in, under the hook's declared 2 s timeout with
@@ -57,6 +55,7 @@ NO_HARNESS = "no_harness"
 AUTHORITY_MISSING = "authority_missing"
 AUTHORITY_UNREADABLE = "authority_unreadable"
 OUTPOST_UNREACHABLE = "outpost_unreachable"
+SOCKET_NOT_REACHABLE = "socket_not_reachable"
 UNEXPECTED_REPLY = "unexpected_reply"
 UNEXPECTED_FAILURE = "unexpected_failure"
 
@@ -73,6 +72,7 @@ NEXT_STEPS = {
         "This process cannot read Outpost's registration authority; run it where that file is readable."
     ),
     OUTPOST_UNREACHABLE: "Start Outpost, then try again.",
+    SOCKET_NOT_REACHABLE: "This process cannot reach Outpost's gateway socket; run it as the user running Outpost.",
     UNEXPECTED_REPLY: "Outpost answered the registration with a reply this command cannot read.",
     UNEXPECTED_FAILURE: "Registration failed unexpectedly; try again.",
 }
@@ -119,10 +119,10 @@ def _read_authority() -> str:
     return authority
 
 
-def register(*, port: int | None = None, timeout: float | None = TIMEOUT_SECONDS) -> str:
+def register(*, timeout: float | None = TIMEOUT_SECONDS) -> str:
     """Register this process's harness; return the session key or raise :class:`Refused`.
 
-    *port* defaults to ``PORT``; a *timeout* of ``None`` leaves the call to the reach budget of the command that runs
+    The call goes over Outpost's gateway socket. A *timeout* of ``None`` leaves the call to the reach budget of the command that runs
     it."""
     found = harness_process()
     if found is None:
@@ -136,11 +136,12 @@ def register(*, port: int | None = None, timeout: float | None = TIMEOUT_SECONDS
             "/gateway/sessions",
             headers={"Authorization": f"Bearer {authority}"},
             json_body={"pid": pid, "start_time": start_time},
-            port=PORT if port is None else port,
             timeout=timeout,
         )
     except outpost_http.OutpostUnreachable:
         raise Refused(OUTPOST_UNREACHABLE, local_key) from None
+    except outpost_http.SocketNotReachable:
+        raise Refused(SOCKET_NOT_REACHABLE, local_key) from None
     if reply.status == 200 and isinstance(reply.body.get("session_key"), str):
         return local_key
     reason = reply.body.get("reason")
@@ -161,6 +162,8 @@ def no_credential_line(reason: str, message: str | None = None) -> str:
     *message*."""
     if reason == OUTPOST_UNREACHABLE:
         why = "Outpost is unreachable; it will register on the first gateway call once Outpost is back"
+    elif reason == SOCKET_NOT_REACHABLE:
+        why = "Outpost's gateway socket is not reachable from here (permission denied); it will register on the first gateway call from where it is"
     elif reason == "not_in_workspace":
         why = NO_GATEWAY_OUTSIDE_WORKSPACE
     else:

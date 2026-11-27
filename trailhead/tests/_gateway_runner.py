@@ -1,6 +1,6 @@
-"""Test entry for the gateway command: ``_gateway_runner.py <port> <env-dump> <argv...>``.
+"""Test entry for the gateway command: ``_gateway_runner.py <env-dump> <argv...>``.
 
-Runs the command's ``main`` against a stub Outpost port, refuses any subprocess,
+Runs the command's ``main`` against the Outpost named by OUTPOST_STATE_DIR, refuses any subprocess,
 (with GATEWAY_RUNNER_NO_HARNESS set, no process counts as a harness, as in the sandbox)
 and writes ``os.environ`` as it stands after the call to *env-dump*. With GATEWAY_RUNNER_ENTRY=auth_header it runs
 the headersHelper entry instead.
@@ -25,9 +25,9 @@ if os.environ.get("GATEWAY_RUNNER_NO_HARNESS"):
 
 from trailhead.gateway import command  # noqa: E402
 
-port, env_dump, argv = int(sys.argv[1]), sys.argv[2], sys.argv[3:]
+env_dump, argv = sys.argv[1], sys.argv[2:]
 entry = command.auth_header_main if os.environ.get("GATEWAY_RUNNER_ENTRY") == "auth_header" else command.main
-rc = entry(argv, port=port)
+rc = entry(argv)
 with open(env_dump, "w") as fh:
     json.dump(dict(os.environ), fh)
 sys.exit(rc)

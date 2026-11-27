@@ -48,7 +48,7 @@ def world(tmp_path_factory):
 def gateway(root, name, cwd, outpost, argv, *, env=None):
     """Run the gateway command with *argv* as a child of a fake harness started in *cwd*; its output and exit code."""
     env = env if env is not None else step_env(root, outpost)
-    cmd = gateway_runner_cmd(outpost.port, root / f"{name}-env.json", argv)
+    cmd = gateway_runner_cmd(root / f"{name}-env.json", argv)
     out = run_fake_harness(root, name, cwd, [("gateway", cmd)], env)["gateway"]
     *lines, last = out.splitlines()
     return int(last.removeprefix("rc=")), "\n".join(lines)
@@ -71,18 +71,15 @@ def test_a_session_outside_any_camp_workspace_is_told_such_sessions_have_no_gate
     )
 
 
-def test_a_registration_outpost_refuses_prints_outposts_reason_and_next_step(world, tmp_path):
+def test_a_registration_outpost_refuses_prints_outposts_reason_and_next_step(world):
     root, camp, outpost = world
-    wrong = tmp_path / "wrong-authority-state"
-    write_authority(wrong, "not-the-registration-authority")
-    rc, out = gateway(
-        root,
-        "wrong-authority",
-        camp.w1,
-        outpost,
-        ["run", "list"],
-        env={**step_env(root, outpost), "OUTPOST_STATE_DIR": str(wrong)},
-    )
+    authority = outpost.state / "registration" / "credential"
+    real = authority.read_text()
+    write_authority(outpost.state, "not-the-registration-authority")
+    try:
+        rc, out = gateway(root, "wrong-authority", camp.w1, outpost, ["run", "list"])
+    finally:
+        write_authority(outpost.state, real.strip())
     assert rc == 2
     assert out == (
         "outpost-gateway: this session is not registered: registration_authority_required: "
@@ -94,14 +91,11 @@ def test_a_credential_outpost_does_not_know_is_refused_with_the_fixtures_credent
     world, tmp_path
 ):
     root, camp, outpost = world
-    state = tmp_path / "unknown-credential-state"
-    state.mkdir()
     result = run_gateway_runner(
         make_fake_harness(root / "unknown-credential"),
         ["run", "list"],
-        state_dir=state,
-        port=outpost.port,
-        seed=lambda key: write_credential(state, key, client_id="not-a-client", client_secret="not-a-secret"),
+        state_dir=outpost.state,
+        seed=lambda key: write_credential(outpost.state, key, client_id="not-a-client", client_secret="not-a-secret"),
         scratch=tmp_path,
     )
     assert result.proc.returncode == 2
@@ -127,7 +121,7 @@ def test_a_credential_whose_session_ended_is_refused_with_the_fixtures_credentia
         "d.execute(\\\"UPDATE broker_clients SET revoked_at = 1 WHERE principal_kind = 'workspace-session'\\\"); "
         "d.commit()\""
     )
-    list_cmd = gateway_runner_cmd(outpost.port, root / "revoked-env.json", ["run", "list"])
+    list_cmd = gateway_runner_cmd(root / "revoked-env.json", ["run", "list"])
     sections = run_fake_harness(
         root,
         "revoked",

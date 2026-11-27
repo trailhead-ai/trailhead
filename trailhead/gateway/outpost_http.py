@@ -1,9 +1,14 @@
-"""Small loopback client for Outpost's HTTP routes, shared by the gateway commands.
+"""Small client for Outpost's gateway routes, shared by the gateway commands.
 
-Stdlib only. Talks to ``127.0.0.1`` directly: proxy environment variables (the
-sandbox exports them) are ignored, redirects are refused, and every call has a
-short timeout. Replies are JSON in and out; a non-2xx status is a result, not an
-exception, so the caller can name the refusal. Only an unreachable Outpost raises.
+Stdlib only. Talks HTTP over the unix socket Outpost serves the gateway on, at a fixed place under
+Outpost's state folder (``socket_path``). The socket path is derived from that folder the way Outpost derives it
+(``OUTPOST_STATE_DIR``, then ``XDG_STATE_HOME``); there is no argument or variable that names the socket, and no
+TCP: a credential, token or registration authority is never sent to a port, so a process squatting on one is sent
+nothing. The folder is operator-only, which is the access control: a session that cannot write it cannot plant a
+socket there. Proxy environment variables do not apply to a socket, redirects are refused, and every call has a short
+timeout. Replies are JSON in and out; a non-2xx status is a result, not an exception, so the caller can name the
+refusal. Only an unreachable Outpost raises: ``OutpostUnreachable`` when the socket is missing or refuses (Outpost is
+not running), ``SocketNotReachable`` when the operating system denies this process the socket.
 
 Reaching Outpost has one overall budget (``reach_budget``): every call made without an
 explicit timeout draws on what is left of it until the caller says ``reached``, so a command
@@ -19,19 +24,19 @@ talking and a stalled connection is given up on.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import socket
 import time
-import http.client
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import BinaryIO
 
-from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT
+from trailhead.outpost_lifecycle import APP as OUTPOST_APP
+from trailhead.paths import state_dir
 
 CONNECT_TIMEOUT_SECONDS = 5.0
 REACH_BUDGET_SECONDS = 4.5
@@ -42,12 +47,25 @@ IDLE_TIMEOUT_SECONDS = 120.0
 _deadline: float | None = None
 
 
-class OutpostUnreachable(Exception):
-    """Outpost did not answer on the loopback port."""
+def socket_path() -> Path:
+    """Outpost's gateway socket: ``gateway/gateway.sock`` under Outpost's state folder."""
+    return state_dir(OUTPOST_APP) / "gateway" / "gateway.sock"
 
-    def __init__(self, port: int) -> None:
-        super().__init__(f"{DAEMON_HOST}:{port}")
-        self.port = port
+
+class OutpostUnreachable(Exception):
+    """Outpost did not answer on its gateway socket: there is none, or nothing accepts on it."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(str(path))
+        self.path = path
+
+
+class SocketNotReachable(Exception):
+    """The operating system denies this process Outpost's gateway socket."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(str(path))
+        self.path = path
 
 
 class ReplyTimedOut(OutpostUnreachable):
@@ -69,13 +87,39 @@ class Reply:
     """The decoded JSON body when it is an object, else an empty dict."""
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+class _SocketConnection(http.client.HTTPConnection):
+    def __init__(self, path: Path, timeout: float) -> None:
+        super().__init__("localhost", timeout=timeout)
+        self._path = path
+
+    def connect(self) -> None:
+        try:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        except PermissionError:
+            raise SocketNotReachable(self._path) from None
+        try:
+            sock.settimeout(self.timeout)
+            sock.connect(str(self._path))
+        except PermissionError:
+            sock.close()
+            raise SocketNotReachable(self._path) from None
+        except OSError:
+            sock.close()
+            raise OutpostUnreachable(self._path) from None
+        self.sock = sock
 
 
-def _opener() -> urllib.request.OpenerDirector:
-    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+def _connection(timeout: float) -> _SocketConnection:
+    """A connection to Outpost's socket. Looking the path up first leaves a missing socket, or one in a folder this
+    process cannot enter, reported without opening a socket at all."""
+    path = socket_path()
+    try:
+        path.lstat()
+    except PermissionError:
+        raise SocketNotReachable(path) from None
+    except OSError:
+        raise OutpostUnreachable(path) from None
+    return _SocketConnection(path, timeout)
 
 
 def start_reach_budget() -> None:
@@ -100,14 +144,14 @@ def reached() -> None:
     _deadline = None
 
 
-def _timeout_for(timeout: float | None, port: int) -> float:
+def _timeout_for(timeout: float | None) -> float:
     if timeout is not None:
         return timeout
     if _deadline is None:
         return CONNECT_TIMEOUT_SECONDS
     remaining = _deadline - time.monotonic()
     if remaining <= 0:
-        raise OutpostUnreachable(port)
+        raise OutpostUnreachable(socket_path())
     return remaining
 
 
@@ -123,44 +167,43 @@ def request(
     form: dict[str, str] | None = None,
     json_body: object | None = None,
     body_file: tuple[BinaryIO, int, str] | None = None,
-    port: int = DAEMON_PORT,
     timeout: float | None = None,
 ) -> Reply:
-    """One loopback call. *form* is sent urlencoded, *json_body* as JSON; the reply body is parsed as a JSON object.
+    """One call over the gateway socket. *form* is sent urlencoded, *json_body* as JSON; the reply body is parsed as a
+    JSON object.
 
     *body_file* is ``(file, length, content_type)``: the file is read and sent as it is written to the socket, never
     held whole in memory, and the idle timeout replaces *timeout* so a large upload is not cut off by a short one.
     Without a *timeout* the call draws on the reach budget while one is running, else ``CONNECT_TIMEOUT_SECONDS``.
     A call whose request was sent and got no answer in time raises :class:`ReplyTimedOut`.
     """
-    data: object = urllib.parse.urlencode(form).encode() if form is not None else None
+    send_headers = dict(headers or {})
+    data: object = None
+    if form is not None:
+        data = urllib.parse.urlencode(form).encode()
+        send_headers["Content-Type"] = "application/x-www-form-urlencoded"
     if json_body is not None:
         data = json.dumps(json_body).encode()
+        send_headers["Content-Type"] = "application/json"
     if body_file is not None:
         data = body_file[0]
         timeout = IDLE_TIMEOUT_SECONDS
-    timeout = _timeout_for(timeout, port)
-    req = urllib.request.Request(f"http://{DAEMON_HOST}:{port}{path}", data=data, method=method)
-    for name, value in (headers or {}).items():
-        req.add_header(name, value)
-    if body_file is not None:
-        req.add_header("Content-Length", str(body_file[1]))
-        req.add_header("Content-Type", body_file[2])
-    elif json_body is not None:
-        req.add_header("Content-Type", "application/json")
-    elif data is not None:
-        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        send_headers["Content-Length"] = str(body_file[1])
+        send_headers["Content-Type"] = body_file[2]
+    send_headers["Connection"] = "close"
+    conn = _connection(_timeout_for(timeout))
     try:
-        with _opener().open(req, timeout=timeout) as resp:
-            status, raw = resp.status, resp.read()
-    except urllib.error.HTTPError as err:
-        status, raw = err.code, err.read()
-    except urllib.error.URLError as err:
-        raise OutpostUnreachable(port) from err
+        conn.request(method, path, body=data, headers=send_headers)
+        resp = conn.getresponse()
+        status, raw = resp.status, resp.read()
+    except (SocketNotReachable, OutpostUnreachable):
+        raise
     except TimeoutError as err:
-        raise ReplyTimedOut(port) from err
-    except OSError as err:
-        raise OutpostUnreachable(port) from err
+        raise ReplyTimedOut(conn._path) from err
+    except (http.client.HTTPException, OSError) as err:
+        raise OutpostUnreachable(conn._path) from err
+    finally:
+        conn.close()
     return _reply(status, raw)
 
 
@@ -175,7 +218,8 @@ def _reply(status: int, raw: bytes) -> Reply:
 class Stream:
     """An open reply read as it arrives. A non-2xx status is in ``refusal``; otherwise ``lines()`` yields the body."""
 
-    def __init__(self, resp, refusal: Reply | None) -> None:
+    def __init__(self, conn: http.client.HTTPConnection, resp: http.client.HTTPResponse, refusal: Reply | None) -> None:
+        self._conn = conn
         self._resp = resp
         self.refusal = refusal
 
@@ -190,26 +234,23 @@ class Stream:
 
     def close(self) -> None:
         self._resp.close()
+        self._conn.close()
 
 
-def open_stream(
-    path: str,
-    *,
-    headers: dict[str, str] | None = None,
-    port: int = DAEMON_PORT,
-) -> Stream:
+def open_stream(path: str, *, headers: dict[str, str] | None = None) -> Stream:
     """GET *path* and hand back the reply unread, each read bounded by the idle timeout."""
-    req = urllib.request.Request(f"http://{DAEMON_HOST}:{port}{path}", method="GET")
-    for name, value in (headers or {}).items():
-        req.add_header(name, value)
+    conn = _connection(IDLE_TIMEOUT_SECONDS)
     try:
-        resp = _opener().open(req, timeout=IDLE_TIMEOUT_SECONDS)
-    except urllib.error.HTTPError as err:
-        try:
-            raw = err.read()
-        except (http.client.HTTPException, OSError) as broken:
-            raise OutpostUnreachable(port) from broken
-        return Stream(err, _reply(err.code, raw))
-    except (urllib.error.URLError, OSError) as err:
-        raise OutpostUnreachable(port) from err
-    return Stream(resp, None)
+        conn.request("GET", path, headers={**(headers or {}), "Connection": "close"})
+        resp = conn.getresponse()
+        if not 200 <= resp.status < 300:
+            raw = resp.read()
+            refusal = _reply(resp.status, raw)
+            return Stream(conn, resp, refusal)
+    except (SocketNotReachable, OutpostUnreachable):
+        conn.close()
+        raise
+    except (http.client.HTTPException, OSError) as err:
+        conn.close()
+        raise OutpostUnreachable(conn._path) from err
+    return Stream(conn, resp, None)
