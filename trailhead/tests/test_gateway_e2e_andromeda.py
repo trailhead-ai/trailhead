@@ -75,6 +75,7 @@ from ._gateway_e2e_support import (
     denial_facts,
     denial_steps,
     launched_session_settings,
+    meeting_folder,
     read_tool_paths,
     write_late_file_probe,
     write_path_shadow,
@@ -267,14 +268,11 @@ def test_without_denyread_the_credential_read_succeeds_and_the_refusal_check_fai
         check_credential_file_read_is_refused(facts, session)
 
 
-def test_without_the_hook_nothing_registers_and_the_list_and_registration_checks_fail(tmp_path_factory, bystander):
-    facts, session = _session(tmp_path_factory, bystander, "broken-no-hook", with_hook=False)
+def test_without_the_hook_the_first_gateway_call_registers_w1_and_lists_an_empty_run_list(tmp_path_factory, bystander):
+    facts, session = _session(tmp_path_factory, bystander, "no-hook", with_hook=False)
     _ran(session, "run_list")
-    assert facts.credentials == [] and facts.registry == [], f"something registered without the hook: {facts}"
-    with pytest.raises(AssertionError, match="no credential file"):
-        check_hook_registered_the_session_for_w1(facts, session)
-    with pytest.raises(AssertionError, match="no gateway credential"):
-        check_run_list_prints_the_empty_list(facts, session)
+    check_hook_registered_the_session_for_w1(facts, session)
+    check_run_list_prints_the_empty_list(facts, session)
 
 
 def test_a_session_started_in_w2_registers_w2_and_the_w1_checks_fail(tmp_path_factory, bystander):
@@ -307,7 +305,7 @@ def _denial_session(tmp_path_factory, label, *, kind, deny_read=True):
         shim_bin = install_shims(root, outpost)
         gateway = shim_bin / "outpost-gateway"
         write_path_shadow(root / "shadow", outpost.state)
-        rendezvous = Path(tempfile.mkdtemp(prefix="gw-denial-", dir="/tmp"))
+        rendezvous = meeting_folder(camp.w1)
         write_late_file_probe(rendezvous)
         actor = LateFileActor(outpost.state / "db", rendezvous)
         (camp.w1 / READ_CONTROL).write_text(READ_CONTROL_TEXT)

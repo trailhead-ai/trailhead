@@ -690,10 +690,28 @@ def test_a_launched_profile_allows_the_pinned_gateway_shim_the_user_excludes(tmp
     assert f"Bash({shim}:*)" in start["permissions"]["allow"]
 
 
-def test_a_launched_profile_does_not_allow_a_gateway_shim_the_user_does_not_exclude(tmp_path):
+def test_a_launched_profile_excludes_the_pinned_gateway_shim_itself_when_the_user_excludes_nothing(tmp_path):
     env = _fence(tmp_path)
+    shim = _gateway_shim(env)
+    start = _launched_with_exclusions(env, [])
+    assert start["sandbox"]["excludedCommands"] == [shim, f"{shim} *"]
+    assert start["permissions"]["allow"][0] == f"Bash({shim}:*)"
+
+
+def test_a_launched_profile_allows_only_the_pinned_gateway_shim_whatever_else_the_user_excludes(tmp_path):
+    env = _fence(tmp_path)
+    shim = _gateway_shim(env)
     start = _launched_with_exclusions(env, ["claude plugin eval *"])
-    assert not [r for r in start["permissions"].get("allow", []) if r.startswith("Bash(")]
+    assert [r for r in start["permissions"]["allow"] if r.startswith("Bash(")] == [f"Bash({shim}:*)"]
+    assert start["sandbox"]["excludedCommands"] == [shim, f"{shim} *"]
+    assert "Bash(claude plugin eval *)" in start["permissions"]["deny"]
+
+
+def test_a_hub_launch_excludes_no_command_from_the_sandbox(tmp_path):
+    env = _fence(tmp_path)
+    shim = _gateway_shim(env)
+    start = _hub_launched_with_exclusions(env, [shim, f"{shim} *"])
+    assert "excludedCommands" not in start["sandbox"]
 
 
 def test_a_gateway_command_at_another_path_is_still_denied_in_a_launched_profile(tmp_path):
@@ -701,7 +719,9 @@ def test_a_gateway_command_at_another_path_is_still_denied_in_a_launched_profile
     start = _launched_with_exclusions(env, ["/elsewhere/bin/outpost-gateway", "/elsewhere/bin/outpost-gateway *"])
     denied = [r for r in start["permissions"]["deny"] if r.startswith("Bash(")]
     assert denied[:2] == ["Bash(/elsewhere/bin/outpost-gateway)", "Bash(/elsewhere/bin/outpost-gateway *)"]
-    assert not [r for r in start["permissions"].get("allow", []) if r.startswith("Bash(")]
+    assert [r for r in start["permissions"]["allow"] if r.startswith("Bash(")] == [
+        f"Bash({_gateway_shim(env)}:*)"
+    ]
 
 
 def test_a_launched_profile_that_runs_the_gateway_denies_the_header_shim(tmp_path):
@@ -2504,7 +2524,8 @@ def test_ritual_file_tools_may_write_wherever_its_sandbox_lets_it_write(tmp_path
     for workspace in (ws, _make_workspace(env, slug="ws2")):
         settings = _settings_of(_ritual_start(env, workspace))
         roots = settings["sandbox"]["filesystem"]["allowWrite"]
-        assert sorted(settings["permissions"]["allow"]) == sorted(f"Edit(/{r}/**)" for r in roots)
+        allowed_edits = [r for r in settings["permissions"]["allow"] if r.startswith("Edit(")]
+        assert sorted(allowed_edits) == sorted(f"Edit(/{r}/**)" for r in roots)
         assert f"Edit(/{workspace}/**)" in settings["permissions"]["allow"]
 
 

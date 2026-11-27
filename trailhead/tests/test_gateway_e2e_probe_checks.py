@@ -39,6 +39,7 @@ from ._gateway_e2e_support import (
     denial_facts,
     denial_steps,
     launched_session_settings,
+    meeting_folder,
     read_results,
     read_tool_paths,
     write_late_file_probe,
@@ -149,6 +150,43 @@ def test_the_late_side_file_check_proves_nothing_when_the_file_was_never_created
     out = "late_file=refused:No such file or directory\nlisting=refused:No such file or directory\n"
     with pytest.raises(AssertionError, match="proves nothing"):
         check_the_late_side_file_is_refused(DenialFacts({}, False), Session({"late_file": out}, 0, Path("/dev/null")))
+
+
+def _listing_session(listing: str) -> Session:
+    out = f"late_file=refused:No such file or directory\n{listing}\n"
+    return Session({"late_file": out}, 0, Path("/dev/null"))
+
+
+def test_an_empty_listing_of_the_masked_folder_passes_on_linux_and_fails_elsewhere():
+    facts = DenialFacts({}, True)
+    check_the_late_side_file_is_refused(facts, _listing_session("listing="), platform="linux")
+    with pytest.raises(AssertionError, match="listed"):
+        check_the_late_side_file_is_refused(facts, _listing_session("listing="), platform="darwin")
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+@pytest.mark.parametrize("listing", ["listing=state.db", f"listing={LATE_FILE}", f"listing=a,state.db,{LATE_FILE}", "listing=refused:state.db"])
+def test_a_listing_that_names_the_database_or_the_late_file_fails_on_every_platform(platform, listing):
+    with pytest.raises(AssertionError, match="listed"):
+        check_the_late_side_file_is_refused(DenialFacts({}, True), _listing_session(listing), platform=platform)
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_a_refused_listing_passes_on_every_platform(platform):
+    session = _listing_session("listing=refused:Permission denied")
+    check_the_late_side_file_is_refused(DenialFacts({}, True), session, platform=platform)
+
+
+def test_the_meeting_folder_is_a_fresh_writable_folder_inside_the_workspace_even_through_a_symlink(tmp_path):
+    real = tmp_path / "real-ws"
+    real.mkdir()
+    link = tmp_path / "link-ws"
+    link.symlink_to(real)
+    first, second = meeting_folder(link), meeting_folder(link)
+    assert first != second
+    for folder in (first, second):
+        assert folder.is_dir() and folder == folder.resolve() and folder.is_relative_to(real.resolve())
+        (folder / "probe").write_text("x")
 
 
 def test_a_path_shadowed_gateway_check_fails_when_the_shadow_read_the_credential_and_passes_when_it_could_not(tmp_path):

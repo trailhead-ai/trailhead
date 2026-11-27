@@ -873,7 +873,8 @@ def claude_config_file(env: Mapping[str, str] | None) -> Path:
 #   permission rule: a denial beats any allowance at every scope, so the command is
 #   refused rather than run unconfined. The one exception is the pinned ``outpost-gateway`` shim
 #   (see ``_gateway_shim_rules``): it acts only as the session that runs it, and a ritual session
-#   holds a gateway credential for it, so it is allowed instead.
+#   holds a gateway credential for it, so the launch itself excludes and allows it, with no reliance
+#   on the user's settings.
 # * The directory the session starts in is writable and trusted, so a session could
 #   rewrite the project settings, hooks, agents and MCP config a later launch honours.
 #   ``<directory>/.claude`` and ``<directory>/.mcp.json`` are therefore always denied.
@@ -1244,22 +1245,20 @@ def _managed_settings(home: Path, launch_dir: Path, platform: str | None = None)
     return [_UserSettings(p, home, launch_dir, kind="managed", platform=plat) for p in paths]
 
 
-def _gateway_shim_rules(user: _UserSettings, env: dict[str, str]) -> tuple[set[str], list[str], list[str]]:
-    """What a launched profile does about the pinned ``outpost-gateway`` shim the user excludes from the sandbox.
+def _gateway_shim_rules(env: dict[str, str]) -> tuple[list[str], list[str], list[str]]:
+    """What a launched workspace profile carries for the pinned ``outpost-gateway`` shim.
 
     The shim is the session's way to its own workspace's runs and acts only as the session that runs it, so
-    its excluded-command entries (the path, and the path with arguments) are returned to be left out of the
-    ``Bash()`` denials, with an allow rule for it. The shim that prints the tool server's header is denied,
-    since only the harness has any business running it. All three are empty when the user does not exclude the shim;
-    a profile with no workspace has no gateway to reach, so the caller does not apply them to it.
+    the launch itself excludes it from the sandbox (its path, and the path with arguments), whatever the user's
+    own settings say or whether they are read at all, and allows it. Those exclusion entries are returned to be
+    left out of the ``Bash()`` denials of the user's exclusions. The shim that prints the tool server's header
+    is denied, since only the harness has any business running it. A profile with no workspace has no gateway to
+    reach, so the caller does not apply them to it.
     """
     bin_dir = _state_dir("trailhead", env=env) / "bin"
     shim = str(bin_dir / "outpost-gateway")
-    entries = {shim, f"{shim} *"}
-    if not entries & set(user.excluded_commands):
-        return set(), [], []
     header = str(bin_dir / "trailhead-gateway-auth-header")
-    return entries, [f"Bash({shim}:*)"], [f"Bash({header})", f"Bash({header} *)"]
+    return [shim, f"{shim} *"], [f"Bash({shim}:*)"], [f"Bash({header})", f"Bash({header} *)"]
 
 
 def _tmux_socket_dir(env: dict[str, str], uid: int) -> Path:
@@ -2673,7 +2672,7 @@ class ClaudeCodeHarness(Harness):
         deny_write += [str(p) for p in write_denied if str(p) not in deny_write]
 
         gateway_commands, gateway_allowed, gateway_denied = (
-            _gateway_shim_rules(user, source) if ROLE_WORKSPACE in profile.paths else (set(), [], [])
+            _gateway_shim_rules(source) if ROLE_WORKSPACE in profile.paths else ([], [], [])
         )
         denied_reads = _profile_denied_reads(profile, config_dir, home)
         # A ritual never prompts, so under dontAsk its file tools write only where an allow rule
@@ -2710,6 +2709,8 @@ class ClaudeCodeHarness(Harness):
             },
             "enabledMcpjsonServers": [n for n in profile.profile.mcp_servers if n != BROKER_SERVER],
         }
+        if gateway_commands:
+            settings["sandbox"]["excludedCommands"] = gateway_commands
         if gateway_allowed:
             settings["permissions"].setdefault("allow", []).extend(gateway_allowed)
         if file_tool_roots:

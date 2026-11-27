@@ -23,6 +23,8 @@ import socket
 import stat
 import sqlite3
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import tomllib
@@ -1423,6 +1425,14 @@ except OSError as err:
 """ % LATE_FILE
 
 
+def meeting_folder(workspace: Path) -> Path:
+    """A fresh folder inside *workspace*, resolved through any symlink, where the probe and its actor meet.
+
+    Both sessions can write the workspace; ``/tmp`` is a path the sandbox may give each session its own copy of.
+    """
+    return Path(tempfile.mkdtemp(prefix=".gw-denial-", dir=Path(workspace).resolve()))
+
+
 def write_late_file_probe(rendezvous: Path) -> Path:
     rendezvous.mkdir(parents=True, exist_ok=True)
     script = rendezvous / "late_file_probe.py"
@@ -1526,11 +1536,17 @@ def check_read_is_refused(step: str):
     return check
 
 
-def check_the_late_side_file_is_refused(facts: DenialFacts, session: Session) -> None:
+def check_the_late_side_file_is_refused(
+    facts: DenialFacts, session: Session, platform: str = sys.platform
+) -> None:
     assert facts.late_file_created, "the late side file was never created, so a refusal proves nothing"
     out = _out(session, "late_file")
     assert "late_file=refused" in out and "late_file=readable" not in out, f"the late file was not refused: {out!r}"
-    assert "listing=refused" in out, f"the database folder could be listed: {out!r}"
+    listing = out.split("listing=", 1)[1].splitlines()[0] if "listing=" in out else None
+    assert listing is not None, f"the probe printed no listing line: {out!r}"
+    bare = listing == "" and platform.startswith("linux")
+    assert listing.startswith("refused") or bare, f"the database folder could be listed: {out!r}"
+    assert "state.db" not in out and LATE_FILE not in out, f"the database folder listed a file: {out!r}"
 
 
 def check_a_shadowed_gateway_cannot_read_the_credential(facts: DenialFacts, session: Session) -> None:
@@ -1617,9 +1633,10 @@ def launched_session_settings(root: Path, outpost_state: Path, workspace: Path) 
 
     ``ClaudeCodeHarness.session_start`` renders ``RITUAL_PROFILE`` exactly as ``trailhead session-start --role
     ritual`` does for a launch. The fence names a throwaway home, lore, cache and camp state, and Outpost's
-    state is *outpost_state*, so the whole-state-folder deny lands on the temp Outpost under test. The user
-    excludes the pinned ``outpost-gateway`` shim ``install_shims`` writes under *root* (as the dotfiles do), so the
-    profile's rules for it are the ones the session runs under.
+    state is *outpost_state*, so the whole-state-folder deny lands on the temp Outpost under test. The user's own
+    settings exclude nothing, and the e2e session reads only these launch settings (``--setting-sources project``),
+    so the exclusion of the pinned ``outpost-gateway`` shim ``install_shims`` writes under *root* is the one the
+    launch itself carries.
     """
     from trailhead.harness.claude_code import ClaudeCodeHarness
     from trailhead.launch_profile import RITUAL_PROFILE, resolve_profile
@@ -1637,7 +1654,6 @@ def launched_session_settings(root: Path, outpost_state: Path, workspace: Path) 
         "TRAILHEAD_STATE_DIR": str(root / "trailhead-state"),
         "PATH": os.environ.get("PATH", ""),
     }
-    shim = str(Path(env["TRAILHEAD_STATE_DIR"]) / "bin" / "outpost-gateway")
     user_settings = Path(env["HOME"]) / ".claude"
     user_settings.mkdir(parents=True, exist_ok=True)
     write_hub_config(HubConfig(name="Hub A", account="a", launch_account="default"), env=env, platform="linux")
@@ -1650,7 +1666,6 @@ def launched_session_settings(root: Path, outpost_state: Path, workspace: Path) 
             {
                 "sandbox": {
                     "enabled": True,
-                    "excludedCommands": ["claude plugin eval *", "portage eval-gate *", shim, f"{shim} *"],
                     "filesystem": {"allowWrite": [".", *(str(p) for p in resolved.writable[1:])]},
                     "network": {"allowedDomains": ["api.anthropic.com"]},
                 }
