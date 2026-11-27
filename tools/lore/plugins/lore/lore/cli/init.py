@@ -104,18 +104,13 @@ _GUARD_EXEMPT_DELIM = "\n"
 _SITES_DIR = "sites"
 _OUTPOST_DIR = "outpost"
 
-#: The files lore scaffolds at a vault ROOT. They are denied by literal name
-#: rather than by a ``*/*`` catch-all: a deny rule that matches a DIRECTORY
-#: cascades to everything beneath it and cannot be pierced by any allow, so a
-#: catch-all at the vault root would re-block the sites zone. A root file lore
-#: does not scaffold is left to the runtime hook, which covers the whole vault
-#: subtree minus the exemption.
+#: The files lore scaffolds at a vault ROOT. Earlier installs wrote a literal
+#: deny rule for each; `lore init` now removes those rules by name.
 _VAULT_ROOT_FILES = (".gitignore", ".lore.lock")
 
-#: Non-record subtrees of a vault that still must not be hand-edited. A vault's
-#: ``.git`` holds the history ``lore sync`` distributes and the hooks git runs
-#: on every vault operation — executable code, so it gets its own rule rather
-#: than riding a broader one, which the sites carve-out rules out anyway.
+#: Non-record subtrees of a vault that earlier installs wrote a deny rule for;
+#: `lore init` now removes that rule. The runtime hook is what keeps hand edits
+#: out of them.
 _VAULT_DENIED_TREES = (".git",)
 
 
@@ -135,29 +130,21 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
          ``<vaults_root>/*/outpost`` — the subtrees the hook lets through, so
          each vault's static-site and Outpost-config zones are directly
          writable while every record tree stays CLI-only.
-      4. Static ``permissions.deny`` ``Edit(...)`` rules as **defense-in-depth
-         only** (they cannot cover a symlink's real target, so the runtime hook
-         above is the security-sufficient mechanism): one rule per record kind,
-         generated from the record model, plus one rule per non-record subtree
-         that is still off-limits (a vault's ``.git``) and one literal rule per
-         file lore scaffolds at a vault root. It is a generated list rather than a single
-         ``vaults/**`` rule because a deny that matches a directory cascades to
-         everything beneath it and no allow can pierce it — a blanket rule would
-         re-block the sites zone the hook exempts, at a layer with no carve-out
-         syntax. Both blanket rules an earlier install may have left are removed.
-         ``Edit(path)`` rules cover all file-editing tools (Write/Edit/
-         MultiEdit/NotebookEdit); a ``Write(path)`` rule never matches and makes
-         Claude Code warn at startup. Note the ``//`` double-slash absolute-path
-         grammar (single ``/`` is project-root-relative — a silent footgun).
+      4. No ``permissions.deny`` rules over the vaults. The harness turns an
+         ``Edit(path)`` deny into a write deny for its Bash sandbox, and a deny
+         beats ``sandbox.filesystem.allowWrite``, so a rule over a vault's
+         ``.lore.lock`` or ``session/`` tree breaks every ``lore`` write in a
+         sandboxed session. The hook above is the vault's write protection.
+         Every rule an earlier install generated (the two blanket rules, one
+         rule per record kind, the vault ``.git`` tree and the vault-root
+         files) is removed, so a re-run repairs an existing settings file;
+         the operator's other rules are untouched.
       5. A blanket ``permissions.allow`` ``Bash(lore:*)`` rule. The install is
-         symmetric: the deny rules above force every vault write through the
+         symmetric: the hook above forces every vault write through the
          ``lore`` CLI, so that CLI itself must be a sanctioned command, or
          every invocation — including unattended ones with nothing to answer a
          prompt — stalls on a permission check. A fixed literal, not derived
-         from ``vaults_root`` like the deny rules.
-
-    A record kind added to the model reaches the deny list on the next
-    ``lore init``; until then the hook is its only settings-independent cover.
+         from ``vaults_root``.
 
     Idempotent: re-runs add no duplicate entries. Every upsert goes through
     ``settings_writer`` (stdlib json, atomic write, preserves unrelated keys);
@@ -196,15 +183,15 @@ def _install_guardrail(settings_path: Path, vaults_root: Path) -> None:
     settings_writer_mod.remove_permission_deny(settings_path, f"Edit({blanket_glob})")
 
     for kind in sorted(KINDS):
-        settings_writer_mod.upsert_permission_deny(
+        settings_writer_mod.remove_permission_deny(
             settings_path, f"Edit({vaults_prefix}/*/{kind}/**)"
         )
     for tree in _VAULT_DENIED_TREES:
-        settings_writer_mod.upsert_permission_deny(
+        settings_writer_mod.remove_permission_deny(
             settings_path, f"Edit({vaults_prefix}/*/{tree}/**)"
         )
     for name in _VAULT_ROOT_FILES:
-        settings_writer_mod.upsert_permission_deny(
+        settings_writer_mod.remove_permission_deny(
             settings_path, f"Edit({vaults_prefix}/*/{name})"
         )
 
