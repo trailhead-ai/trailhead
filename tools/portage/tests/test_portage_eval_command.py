@@ -207,6 +207,9 @@ def _workspace(tmp_path, monkeypatch, capsys):
             monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv("HOME", str(home))
         w = Ws(tmp_path, home, capsys)
+        w.acct = tmp_path / "acct"
+        (w.acct / ".local" / "state" / "outpost" / "db").mkdir(parents=True)
+        monkeypatch.setattr(gate_sandbox, "account_home", lambda: w.acct)
         monkeypatch.setenv("PORTAGE_EVAL_RUNNER", str(w.stub))
         try:
             yield w
@@ -767,9 +770,9 @@ SHIM = "/home/someone/.local/state/trailhead/bin/portage-eval"
 
 
 def _mountinfo(ws, monkeypatch, *masked):
-    outpost = ws.home / ".local" / "state" / "outpost"
+    outpost = ws.acct / ".local" / "state" / "outpost"
     lines = [f"{i} 1 0:{i} / {outpost / name} rw,nosuid - tmpfs tmpfs rw" for i, name in enumerate(masked, 40)]
-    path = ws.home / "mountinfo"
+    path = ws.acct / "mountinfo"
     path.write_text("\n".join(["1 0 8:1 / / rw - xfs /dev/sda1 rw", *lines]) + "\n")
     monkeypatch.setattr(gate_sandbox, "MOUNTINFO", path)
 
@@ -1076,21 +1079,20 @@ class TestPinnedShimEndToEnd:
         assert _recorded(ws, "c1")["files"]["skills/x.md"] == "edited after the commit"
 
     @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 folder")
-    def test_the_shim_with_a_credential_folder_the_sandbox_refuses_and_no_backend_tells_the_session_to_stop(
-            self, ws, tmp_path):
-        shim = self._shim(ws, tmp_path)
-        denied = ws.home / ".local" / "state" / "outpost" / "sessions"
+    def test_a_credential_folder_the_sandbox_refuses_and_no_backend_tells_the_session_to_stop(
+            self, ws, monkeypatch):
+        monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
+        denied = ws.acct / ".local" / "state" / "outpost" / "sessions"
         denied.mkdir(parents=True)
         denied.chmod(0)
         try:
-            proc = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1",
-                             marker=False)
+            rc, out, _ = ws.main("eval", "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1")
         finally:
             denied.chmod(0o700)
-        assert proc.returncode == 3, (proc.stdout, proc.stderr)
-        assert "not run: could-not-leave-sandbox" in proc.stdout
-        assert f"{shim} start --plugin plugins/p --case c1 --repo {ws.repo}" in proc.stdout
-        assert "host terminal" in proc.stdout
+        assert rc == 3, out
+        assert "not run: could-not-leave-sandbox" in out.splitlines()
+        assert f"{SHIM} start --plugin plugins/p --case c1 --repo {ws.repo}" in out
+        assert "host terminal" in out
         assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
 
     def test_the_shim_with_a_too_high_required_version_reports_too_old(self, ws, tmp_path):
@@ -1101,13 +1103,11 @@ class TestPinnedShimEndToEnd:
         assert "not run: eval-command-too-old" in proc.stdout.splitlines()
         assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
 
-    def test_the_shim_without_the_marker_runs_locally_with_no_backend_flag(self, ws, tmp_path):
-        shim = self._shim(ws, tmp_path)
-        started = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p",
-                            "--case", "c1", marker=False)
-        assert started.returncode == 0, started.stderr
-        request_id = re.search(r"^request: (\S+)$", started.stdout, re.M).group(1)
-        assert self._run(shim, ws, "wait", request_id, "--timeout-seconds", "100").returncode == 0
+    def test_without_the_marker_start_runs_locally_with_no_backend_flag(self, ws):
+        rc, out, err = ws.main("eval", "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1")
+        assert rc == 0, (out, err)
+        request_id = re.search(r"^request: (\S+)$", out, re.M).group(1)
+        assert ws.main("eval", "wait", request_id, "--timeout-seconds", "100")[0] == 0
 
     def test_a_runner_moved_after_the_build_surfaces_as_runner_broken_stop_and_report_naming_trailhead_update(
             self, ws, tmp_path):

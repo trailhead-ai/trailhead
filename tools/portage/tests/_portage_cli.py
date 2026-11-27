@@ -41,3 +41,6 @@ def contained_tempdir(tmp_path, monkeypatch):
     no_mounts = tmp_path / "no-mounts"
     no_mounts.write_text("")
     monkeypatch.setattr(sandbox, "MOUNTINFO", no_mounts)
+    account = tmp_path / "account-home"
+    (account / sandbox.STATE_UNDER_HOME / "db").mkdir(parents=True)
+    monkeypatch.setattr(sandbox, "account_home", lambda: account)

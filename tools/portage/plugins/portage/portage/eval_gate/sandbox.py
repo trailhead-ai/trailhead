@@ -1,23 +1,28 @@
 """Whether this process runs inside the harness's sandbox, read from what the sandbox does to Outpost's
 credential folders and never from an environment variable or argument a session sets.
 
+The folders probed are ``.local/state/outpost/<name>`` under the account's home in the password
+database (`account_home`), not under `OUTPOST_STATE_DIR`, `XDG_STATE_HOME` or `HOME`, which a session
+can set to point the probe at folders the sandbox does not hide. When none of the probed folders exists
+the probe has nothing to read, so it fails closed and reports sandboxed.
+
 On Linux the sandbox mounts a tmpfs over each of Outpost's read-denied folders (`operator`,
 `registration`, `sessions`, `db` under Outpost's state directory), which `/proc/self/mountinfo` lists.
 On macOS the sandbox refuses the read, so listing an existing folder raises `PermissionError`. A host
 terminal sees neither.
 
-`MOUNTINFO` is the Linux file read; a test points it at a fabricated one.
+`MOUNTINFO` is the Linux file read and `account_home` the home lookup; a test points each at a fabricated one.
 """
 
 from __future__ import annotations
 
 import os
+import pwd
 from pathlib import Path
-
-from trailhead.paths import state_dir
 
 FOLDERS = ("operator", "registration", "sessions", "db")
 MOUNTINFO = Path("/proc/self/mountinfo")
+STATE_UNDER_HOME = Path(".local") / "state" / "outpost"
 
 MESSAGE = (
     "eval-gate: sandboxed\n"
@@ -63,7 +68,23 @@ def _refused(folders: list[Path]) -> bool:
     return False
 
 
+def account_home() -> Path:
+    return Path(pwd.getpwuid(os.getuid()).pw_dir)
+
+
+def _exists(folder: Path) -> bool:
+    try:
+        os.lstat(folder)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 def is_sandboxed() -> bool:
-    root = state_dir("outpost")
+    root = account_home() / STATE_UNDER_HOME
     folders = [root / name for name in FOLDERS]
+    if not any(_exists(f) for f in folders):
+        return True
     return _masked({str(p) for p in folders}) or _refused(folders)

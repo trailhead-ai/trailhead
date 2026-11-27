@@ -26,8 +26,9 @@ FOLDERS = ("operator", "registration", "sessions", "db")
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     h = tmp_path / "home"
-    (h / ".local" / "state" / "outpost").mkdir(parents=True)
+    (h / ".local" / "state" / "outpost" / "db").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(h))
+    monkeypatch.setattr(sandbox, "account_home", lambda: h)
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     monkeypatch.delenv("SANDBOX_RUNTIME", raising=False)
     return h
@@ -57,8 +58,9 @@ def test_mountinfo_with_no_mask_over_outpost_reads_as_not_sandboxed(home, tmp_pa
 
 def test_a_mask_over_a_folder_with_an_escaped_space_in_the_home_reads_as_sandboxed(tmp_path, monkeypatch):
     h = tmp_path / "my home"
-    (h / ".local" / "state" / "outpost").mkdir(parents=True)
+    (h / ".local" / "state" / "outpost" / "db").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(h))
+    monkeypatch.setattr(sandbox, "account_home", lambda: h)
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     _mountinfo(tmp_path, monkeypatch, (_outpost(h, "sessions").replace(" ", "\\040"), "tmpfs"))
     assert sandbox.is_sandboxed() is True
@@ -89,6 +91,41 @@ def test_the_marker_variable_a_session_controls_does_not_change_the_answer(home,
     _mountinfo(tmp_path, monkeypatch, (_outpost(home, "db"), "tmpfs"))
     monkeypatch.delenv("SANDBOX_RUNTIME")
     assert sandbox.is_sandboxed() is True
+
+
+def _env_folders(tmp_path: Path) -> Path:
+    elsewhere = tmp_path / "elsewhere"
+    for name in FOLDERS:
+        (elsewhere / name).mkdir(parents=True)
+    return elsewhere
+
+
+def test_an_outpost_state_dir_a_session_sets_cannot_move_the_probed_folders(home, tmp_path, monkeypatch):
+    _mountinfo(tmp_path, monkeypatch, (_outpost(home, "sessions"), "tmpfs"))
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(_env_folders(tmp_path)))
+    assert sandbox.is_sandboxed() is True
+
+
+def test_an_xdg_state_home_a_session_sets_cannot_move_the_probed_folders(home, tmp_path, monkeypatch):
+    _mountinfo(tmp_path, monkeypatch, (_outpost(home, "sessions"), "tmpfs"))
+    xdg = tmp_path / "xdg"
+    (xdg / "outpost").mkdir(parents=True)
+    monkeypatch.setenv("XDG_STATE_HOME", str(xdg))
+    assert sandbox.is_sandboxed() is True
+
+
+def test_a_home_with_none_of_the_credential_folders_fails_closed_as_sandboxed(home, tmp_path, monkeypatch):
+    _mountinfo(tmp_path, monkeypatch)
+    Path(_outpost(home, "db")).rmdir()
+    assert sandbox.is_sandboxed() is True
+
+
+def test_a_masked_folder_is_found_when_the_environment_points_elsewhere_and_the_real_one_is_readable(
+    home, tmp_path, monkeypatch
+):
+    _mountinfo(tmp_path, monkeypatch)
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(_env_folders(tmp_path)))
+    assert sandbox.is_sandboxed() is False
 
 
 def _repo(tmp_path: Path) -> Path:
