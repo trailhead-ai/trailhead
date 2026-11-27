@@ -27,7 +27,7 @@ calls so two terminals racing camp <slug> don't both git-worktree-add the same
 path, and two concurrent `camp remove <slug>` calls don't both pass the
 dirty-check and race the manifest write (there is no session lock serializing
 removal). The lockfile lives OUTSIDE the workspace dir at
-<worktrees-root>/<slug>.lock (manifest.lock_path_for) so reconcile_break's
+<worktrees-root>/.locks/<slug>.lock (manifest.lock_path_for) so reconcile_break's
 teardown rmtree of the workspace dir cannot delete the held lock inode.
 reconcile_break reaps that lockfile (while still holding the flock) once the
 slug is fully torn down; reconcile_lock's inode identity re-check makes the
@@ -846,7 +846,7 @@ def reconcile_break(
     ws_resolved = ws_dir.resolve()
 
     # Fail-fast on a nonexistent slug BEFORE taking the reconcile lock. The lock
-    # lives at <worktrees-root>/<slug>.lock (outside ws_dir), so acquiring
+    # lives at <worktrees-root>/.locks/<slug>.lock (outside ws_dir), so acquiring
     # it does not pre-create the workspace dir; but it WOULD create a stray
     # <slug>.lock file for a slug that never existed. A bare existence check gates
     # that — the full parse is wasted here since the authoritative read happens

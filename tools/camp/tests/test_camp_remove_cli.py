@@ -553,6 +553,21 @@ class TestSlugLockReap:
             "full teardown must reap the slug lockfile — it must not leak"
         )
 
+    def test_full_teardown_leaves_no_lock_of_its_own_in_the_lock_folder(self, inproc_group):
+        from camp.group.manifest import manifest_path_for
+        from camp.provision.reconcile import reconcile_break
+
+        g = inproc_group
+        _provision_inproc(g, "feat-gone")
+        _provision_inproc(g, "feat-stays")
+        locks = manifest_path_for("removegroup", "feat-gone", env=g["env"]).parent.parent / ".locks"
+        assert any(p.name.startswith("feat-gone") for p in locks.iterdir())
+
+        reconcile_break(g["group"], "feat-gone", env=g["env"])
+
+        left = sorted(p.name for p in locks.iterdir())
+        assert left and all(n.startswith("feat-stays") for n in left), left
+
     def test_partial_failure_keeps_lockfile(self, inproc_group, monkeypatch):
         import camp.provision.reconcile as reconcile
         from camp.group.manifest import manifest_path_for, lock_path_for

@@ -444,12 +444,12 @@ def _assert_sites_tree_contained(sites_dir: Path, target_dir: Path, root: Path) 
 def _lock_path_for(ws_dir: Path) -> Path:
     """Return the slug-scoped lockfile path for a workspace dir.
 
-    A SIBLING of the workspace dir — ``<worktrees-root>/<slug>.lock`` — never
-    a file inside it, so a `camp remove` teardown's ``rmtree`` of the
+    ``<worktrees-root>/.locks/<slug>.lock`` — camp's one lock folder, never
+    a file inside the workspace dir, so a `camp remove` teardown's ``rmtree`` of the
     workspace dir can never delete the inode this publish is flocking.
     """
     ws_dir = Path(ws_dir)
-    return ws_dir.parent / f"{ws_dir.name}.lock"
+    return ws_dir.parent / ".locks" / f"{ws_dir.name}.lock"
 
 
 @contextmanager

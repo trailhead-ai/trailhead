@@ -1177,7 +1177,8 @@ def test_publish_blocks_while_lock_held_and_proceeds_after_release(tmp_path):
     camp_state = tmp_path / "camp-state"
     ws = _make_workspace(camp_state, group="acme", slug="feat-x")
     source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
-    lock_path = ws.parent / f"{ws.name}.lock"
+    lock_path = ws.parent / ".locks" / f"{ws.name}.lock"
+    lock_path.parent.mkdir(exist_ok=True)
 
     holder_fd = open(lock_path, "w")
     fcntl.flock(holder_fd.fileno(), fcntl.LOCK_EX)
@@ -1211,7 +1212,8 @@ def test_lock_reaped_and_recreated_while_waiting_does_not_orphan(tmp_path):
     camp_state = tmp_path / "camp-state"
     ws = _make_workspace(camp_state, group="acme", slug="feat-x")
     source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
-    lock_path = ws.parent / f"{ws.name}.lock"
+    lock_path = ws.parent / ".locks" / f"{ws.name}.lock"
+    lock_path.parent.mkdir(exist_ok=True)
 
     holder_fd = open(lock_path, "w")
     fcntl.flock(holder_fd.fileno(), fcntl.LOCK_EX)
@@ -1400,6 +1402,13 @@ def test_workspace_publish_still_works_with_a_real_sites_directory(tmp_path):
 _CAMP_PLUGIN_DIR = Path(__file__).resolve().parents[2] / "camp" / "plugins" / "camp"
 if str(_CAMP_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_CAMP_PLUGIN_DIR))
+
+
+def test_lock_path_is_the_slug_lock_in_the_worktrees_locks_folder(tmp_path):
+    mod = _load_module()
+    ws = tmp_path / "acme" / "worktrees" / "feat-x"
+
+    assert mod._lock_path_for(ws) == tmp_path / "acme" / "worktrees" / ".locks" / "feat-x.lock"
 
 
 @pytest.mark.parametrize(

@@ -238,11 +238,17 @@ def remove_central_manifest(path: Path) -> None:
         pass
 
 
+LOCKS_DIRNAME = ".locks"
+"""The one folder under a worktrees root that holds every camp lockfile. A slug
+is `^[a-z0-9-]+$`, so no workspace can ever share this name."""
+
+
 def lock_path_for(ws_dir: Path) -> Path:
     """Return the slug-scoped lockfile path for a workspace dir.
 
-    The lockfile is a SIBLING of the workspace dir — <worktrees-root>/<slug>.lock,
-    NOT a file inside it. This is load-bearing for cross-process mutual exclusion:
+    The lockfile lives in <worktrees-root>/.locks/<slug>.lock — beside the
+    workspace dir, NOT inside it, so a session's sandbox can be allowed to write
+    that one folder instead of every workspace. This is load-bearing for cross-process mutual exclusion:
     reconcile_break's teardown `shutil.rmtree`'s the entire workspace dir, so a
     lockfile held INSIDE it would have its inode deleted mid-critical-section. A
     concurrent acquirer (blocked on the old inode, or arriving in the
@@ -259,7 +265,7 @@ def lock_path_for(ws_dir: Path) -> Path:
     lockfile with no live slug is a leak, not a fixture.
     """
     ws_dir = Path(ws_dir)
-    return ws_dir.parent / f"{ws_dir.name}.lock"
+    return ws_dir.parent / LOCKS_DIRNAME / f"{ws_dir.name}.lock"
 
 
 def _acquire_flock(lock_fd, lock_path: Path, *, deadline: float | None) -> None:
@@ -292,9 +298,9 @@ def reconcile_lock(ws_dir: Path, *, timeout: float | None = None):
     never tear the whole-manifest temp+rename write AND a `camp new` seed never
     races a `camp remove` teardown into a ghost workspace.
 
-    The lockfile lives OUTSIDE ws_dir at <worktrees-root>/<slug>.lock (see
-    lock_path_for) so reconcile_break's rmtree of ws_dir cannot delete the held
-    lock inode. Only the worktrees root is mkdir'd here — locking a slug
+    The lockfile lives OUTSIDE ws_dir at <worktrees-root>/.locks/<slug>.lock
+    (see lock_path_for) so reconcile_break's rmtree of ws_dir cannot delete the
+    held lock inode. Only the lock folder is mkdir'd here — locking a slug
     never pre-creates that slug's workspace dir.
 
     Acquisition validates inode identity: reconcile_break reaps the lockfile

@@ -110,7 +110,7 @@ def _persist_activation_result(
 # ---------------------------------------------------------------------------
 # Per-(slug, member) activate-phase concurrency guard.
 #
-# A lockfile SIBLING of the workspace dir (never inside it — reconcile_break's
+# A lockfile in the worktrees root's lock folder (never inside the workspace dir — reconcile_break's
 # teardown rmtree must never be able to delete the inode a live holder has
 # flocked; mirrors group/manifest.py's lock_path_for reasoning for the slug
 # lock). Acquisition is NON-BLOCKING: a losing acquirer never waits, it is told
@@ -126,11 +126,13 @@ def member_guard_lock_path(ws_dir: Path, member_name: str) -> Path:
     """Return the (slug, member) activate-phase guard lockfile path.
 
     A sibling of ws_dir (central_state_dir(group)/worktrees/<slug>), keyed on
-    slug + member — <worktrees-root>/<slug>.<member>.activate.lock — so
+    slug + member — <worktrees-root>/.locks/<slug>.<member>.activate.lock — so
     reconcile_break's rmtree of ws_dir can never delete a held lock's inode.
     """
+    from ..group.manifest import LOCKS_DIRNAME
+
     ws_dir = Path(ws_dir)
-    return ws_dir.parent / f"{ws_dir.name}.{member_name}.activate.lock"
+    return ws_dir.parent / LOCKS_DIRNAME / f"{ws_dir.name}.{member_name}.activate.lock"
 
 
 def _try_acquire_member_guard(ws_dir: Path, member_name: str):

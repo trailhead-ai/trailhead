@@ -157,3 +157,41 @@ def test_the_bound_is_one_deadline_across_a_reaped_lockfile_retry(tmp_path: Path
 
     assert state["reaped"] is True
     assert clock["now"] < 1.2, clock["now"]
+
+
+def test_the_slug_lock_lives_in_the_locks_folder_and_outlasts_the_workspace_dir(tmp_path: Path) -> None:
+    """The lock sits in <worktrees-root>/.locks, created on first acquire, and a
+    teardown that removes the workspace dir never removes the held inode: a
+    second acquirer is still excluded afterwards."""
+    import shutil
+
+    from camp.group.manifest import LockTimeout, reconcile_lock
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    expected = worktrees / ".locks" / "feat-x.lock"
+    assert not expected.parent.exists()
+
+    with reconcile_lock(ws_dir):
+        assert expected.is_file()
+        held_inode = os.stat(expected).st_ino
+        shutil.rmtree(ws_dir)
+        assert os.stat(expected).st_ino == held_inode
+        with pytest.raises(LockTimeout):
+            with reconcile_lock(ws_dir, timeout=0.2):
+                pass
+
+
+def test_reaping_the_slug_lock_removes_only_that_slugs_lock(tmp_path: Path) -> None:
+    from camp.group.manifest import reap_lock_unlocked, reconcile_lock
+
+    worktrees = tmp_path / "worktrees"
+    mine, other = worktrees / "mine", worktrees / "other"
+    mine.mkdir(parents=True)
+    other.mkdir()
+    with reconcile_lock(other):
+        with reconcile_lock(mine):
+            reap_lock_unlocked(mine)
+
+    assert sorted(p.name for p in (worktrees / ".locks").iterdir()) == ["other.lock"]

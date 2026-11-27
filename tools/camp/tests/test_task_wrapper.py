@@ -612,13 +612,11 @@ def test_reconcile_creating_a_workspace_writes_the_wrapper_sidecar_that_survives
     assert len(sc.wrapper_log()) == 4
 
 
-def test_the_sidecar_sits_beside_the_slug_lock_outside_the_workspace_dir(sc):
-    from camp.group.manifest import lock_path_for
-
+def test_the_sidecar_sits_beside_the_workspace_dir_outside_it(sc):
     _seed(sc, sc.wrapper_json())
     ws = _manifest_path(sc).parent
     sidecar = _sidecar_path(sc)
-    assert sidecar.parent == lock_path_for(ws).parent
+    assert sidecar.parent == ws.parent
     assert ws not in sidecar.parents
 
 
