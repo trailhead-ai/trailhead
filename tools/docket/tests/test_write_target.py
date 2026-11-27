@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from test_changes import ref
+from test_changes import env, hermetic_git_env, ref  # noqa: F401  (fixtures)
 
 
 def _files(root):

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from _docket_cli import PLUGIN_ROOT, install, run_cli
+from test_changes import env, hermetic_git_env  # noqa: F401  (fixtures)
 from trailhead.tests._git_support import make_hermetic_git_env
 
 from docket import changes
