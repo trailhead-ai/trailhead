@@ -22,7 +22,7 @@ from trailhead.paths import state_dir
 from trailhead.ranger.cli import main
 from trailhead.ranger.config import HubConfig, write_hub_config
 from trailhead.ranger.outpost_client import tmux_attach_argv
-from trailhead.tests._gateway_support import gateway_socket_path, short_state_dir, unix_http_server
+from trailhead.tests._gateway_support import denied_socket_folder, gateway_socket_path, short_state_dir, unix_http_server
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ranger-contract.json"
 CREDENTIAL = "s3cret-operator-credential"
@@ -251,13 +251,8 @@ def test_a_socket_the_operating_system_denies_us_is_not_reachable_and_nothing_go
     _configure(env, "acme")
     _write_credential(env)
     s = stub(socket=False)
-    socket_path = gateway_socket_path(state_dir("outpost", env=env))
-    socket_path.parent.mkdir(mode=0o700, parents=True)
-    socket_path.parent.chmod(0o000)
-    try:
+    with denied_socket_folder(state_dir("outpost", env=env)) as socket_path:
         rc, ex = _start(env, port=s.port)
-    finally:
-        socket_path.parent.chmod(0o700)
     err = capsys.readouterr().err
     assert rc != 0 and ex.calls == []
     assert f"Outpost's socket at {socket_path} is not reachable from here (permission denied)" in err

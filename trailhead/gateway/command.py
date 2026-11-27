@@ -524,9 +524,9 @@ def _report(err: Exception) -> None:
     if isinstance(err, CommandError):
         print(err, file=sys.stderr)
     elif isinstance(err, outpost_http.OutpostUnreachable):
-        print(_fail(f"Outpost is unreachable at {err.path}; is it running?"), file=sys.stderr)
+        print(_fail(err.message), file=sys.stderr)
     elif isinstance(err, outpost_http.SocketNotReachable):
-        print(_fail(f"Outpost's socket at {err.path} is not reachable from here (permission denied)"), file=sys.stderr)
+        print(_fail(err.message), file=sys.stderr)
     else:
         print(f"outpost-gateway: unexpected failure ({type(err).__name__})", file=sys.stderr)
 

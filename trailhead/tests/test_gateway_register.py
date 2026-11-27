@@ -14,6 +14,7 @@ from trailhead.tests._gateway_support import (
     await_harness,
     REGISTRATION_AUTHORITY,
     StubOutpost,
+    denied_socket_folder,
     register_runner_cmd,
     run_under_harness,
     runner_env,
@@ -21,7 +22,6 @@ from trailhead.tests._gateway_support import (
     silent_socket,
     stale_socket,
     tcp_squatter,
-    gateway_socket_path,
     write_authority,
 )
 from trailhead.tests._harness_process_support import make_fake_harness
@@ -301,13 +301,8 @@ class TestNoCredentialMessage:
         self, run, outpost_state, trailhead_state
     ):
         write_authority(outpost_state)
-        folder = gateway_socket_path(outpost_state).parent
-        folder.mkdir(mode=0o700, parents=True)
-        folder.chmod(0o000)
-        try:
+        with denied_socket_folder(outpost_state):
             proc, _ = run()
-        finally:
-            folder.chmod(0o700)
         assert proc.returncode == 0
         assert proc.stderr.strip() == "socket_not_reachable"
         assert "not reachable from here (permission denied)" in _hook_output(proc)

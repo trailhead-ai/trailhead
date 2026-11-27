@@ -114,11 +114,9 @@ def start_hub(
     except outpost_http.ReplyTimedOut:
         raise OutpostRefusal(f"timed out after {timeout:g}s waiting for Outpost to start the hub") from None
     except outpost_http.OutpostUnreachable as exc:
-        raise OutpostRefusal(f"Outpost is unreachable at {exc.path}; is it running?") from None
+        raise OutpostRefusal(exc.message) from None
     except outpost_http.SocketNotReachable as exc:
-        raise OutpostRefusal(
-            f"Outpost's socket at {exc.path} is not reachable from here (permission denied)"
-        ) from None
+        raise OutpostRefusal(exc.message) from None
     if 200 <= reply.status < 300:
         return
     if 300 <= reply.status < 400:

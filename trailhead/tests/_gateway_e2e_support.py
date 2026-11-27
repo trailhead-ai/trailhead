@@ -37,7 +37,6 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from unittest import mock
 
 from trailhead.install import resolve_cli_tools
 
@@ -46,6 +45,7 @@ from ._gateway_support import (
     REPO_ROOT,
     free_port,
     gateway_runner_cmd,
+    gateway_socket_path,
     register_runner_cmd,
     runner_env,
     short_state_dir,
@@ -202,7 +202,7 @@ def real_outpost(
         while not (
             _health_ok(port)
             and (state / "registration" / "credential").exists()
-            and (state / "gateway" / "gateway.sock").exists()
+            and gateway_socket_path(state).exists()
             and (filter_sock is None or filter_sock.exists())
         ):
             if proc.poll() is not None:
@@ -1419,7 +1419,7 @@ class TokenRecorder:
     """
 
     def __init__(self, state: Path) -> None:
-        self.socket_path = state / "gateway" / "gateway.sock"
+        self.socket_path = gateway_socket_path(state)
         self.upstream_path = self.socket_path.with_name("gateway.upstream.sock")
         self.tokens: set[str] = set()
         self._server: socket.socket | None = None

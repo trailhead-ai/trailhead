@@ -32,7 +32,7 @@ import trailhead
 from trailhead import cli, outpost_lifecycle
 from trailhead import outpost_supervisor as osup
 from trailhead.gateway import outpost_http
-from trailhead.tests._gateway_support import gateway_socket_path, short_state_dir, unix_http_server
+from trailhead.tests._gateway_support import denied_socket_folder, gateway_socket_path, short_state_dir, unix_http_server
 from trailhead.outpost_lifecycle import (
     EXIT_FAILED,
     EXIT_RESTARTING,
@@ -981,18 +981,12 @@ def test_open_with_no_socket_sends_the_credential_to_no_tcp_listener(outpost, tc
 def test_open_with_a_socket_the_operating_system_denies_us_sends_the_credential_to_no_tcp_listener(
     outpost, tcp_outpost
 ):
-    folder = gateway_socket_path(outpost.state_dir).parent
-    folder.mkdir(mode=0o700, parents=True)
-    folder.chmod(0o000)
-    try:
+    with denied_socket_folder(outpost.state_dir) as socket_path:
         with pytest.raises(OutpostLifecycleError) as exc:
             outpost_lifecycle.open_ui(
                 env=outpost.env, port=tcp_outpost.port, opener=_RecordingOpener(), settle=0
             )
-    finally:
-        folder.chmod(0o700)
 
-    socket_path = gateway_socket_path(outpost.state_dir)
     assert f"Outpost's socket at {socket_path} is not reachable from here (permission denied)" in str(exc.value)
     assert tcp_outpost.tcp_credential_posts == []
 

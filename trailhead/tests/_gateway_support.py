@@ -83,6 +83,20 @@ def stale_socket(state: Path) -> Path:
 
 
 @contextmanager
+def denied_socket_folder(state: Path) -> Iterator[Path]:
+    """The gateway socket of *state*, in a folder this process is denied (mode 0000) until the block ends.
+
+    Root passes a folder's mode check, so a test using this skips when run as root."""
+    path = gateway_socket_path(state)
+    path.parent.mkdir(mode=0o700, parents=True)
+    path.parent.chmod(0o000)
+    try:
+        yield path
+    finally:
+        path.parent.chmod(0o700)
+
+
+@contextmanager
 def tcp_squatter() -> Iterator[socket.socket]:
     """A TCP listener on the port Outpost's cockpit uses, as a squatting process would hold it; nothing it is sent is
     read, but ``accept`` (half a second's wait) shows whether anything connected."""

@@ -59,6 +59,7 @@ class OutpostUnreachable(Exception):
     def __init__(self, path: Path) -> None:
         super().__init__(str(path))
         self.path = path
+        self.message = f"Outpost is unreachable at {path}; is it running?"
 
 
 class SocketNotReachable(Exception):
@@ -67,6 +68,7 @@ class SocketNotReachable(Exception):
     def __init__(self, path: Path) -> None:
         super().__init__(str(path))
         self.path = path
+        self.message = f"Outpost's socket at {path} is not reachable from here (permission denied)"
 
 
 class ReplyTimedOut(OutpostUnreachable):

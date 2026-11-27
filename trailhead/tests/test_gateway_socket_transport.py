@@ -10,6 +10,7 @@ import pytest
 from trailhead.gateway import outpost_http
 from trailhead.tests._gateway_support import (
     StubOutpost,
+    denied_socket_folder,
     gateway_socket_path,
     short_state_dir,
     stale_socket,
@@ -75,13 +76,8 @@ def test_a_socket_nothing_listens_on_is_outpost_not_running_naming_the_socket(st
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root passes a folder's mode check, so no folder can deny it")
 def test_a_socket_the_operating_system_denies_us_is_not_reachable_naming_the_socket(state):
-    folder = gateway_socket_path(state).parent
-    folder.mkdir(mode=0o700, parents=True)
-    folder.chmod(0o000)
-    try:
+    with denied_socket_folder(state) as socket_path:
         with pytest.raises(outpost_http.SocketNotReachable) as raised:
             outpost_http.request("GET", "/gateway/runs")
-    finally:
-        folder.chmod(0o700)
-    assert raised.value.path == gateway_socket_path(state)
+    assert raised.value.path == socket_path
     assert not isinstance(raised.value, outpost_http.OutpostUnreachable)

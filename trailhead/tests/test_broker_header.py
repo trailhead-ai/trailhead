@@ -3,19 +3,19 @@
 import json
 import os
 import socket
-import socketserver
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs
 
 import pytest
 
 from trailhead import broker_header, cli
-from trailhead.gateway import outpost_http
 from trailhead.paths import state_dir
 from trailhead.tests._gateway_support import (
+    _UnixHTTPServer,
+    denied_socket_folder,
     gateway_socket_path,
     short_state_dir,
     stale_socket,
@@ -26,15 +26,6 @@ CONTRACT = json.loads((Path(__file__).parent / "fixtures" / "ranger-contract.jso
 SECRET = "s3cret-do-not-leak"
 TOKEN = "tok-issued-123"
 CLIENT_ID = "client-abc"
-
-
-class _UnixServer(ThreadingHTTPServer):
-    address_family = socket.AF_UNIX
-    daemon_threads = True
-
-    def server_bind(self):
-        socketserver.TCPServer.server_bind(self)
-        self.server_name, self.server_port = "outpost", 0
 
 
 class _Stub:
@@ -90,7 +81,7 @@ class _Stub:
 
         folder = gateway_socket_path(state).parent
         folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.server = _UnixServer(str(gateway_socket_path(state)), Handler)
+        self.server = _UnixHTTPServer(str(gateway_socket_path(state)), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def close(self):
@@ -216,16 +207,11 @@ def test_a_socket_nothing_listens_on_is_unreachable(tmp_path, monkeypatch, capsy
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root passes a folder's mode check, so no folder can deny it")
 def test_a_socket_the_operating_system_denies_us_is_not_reachable(tmp_path, monkeypatch, capsys, state):
-    folder = gateway_socket_path(state).parent
-    folder.mkdir(mode=0o700, parents=True)
-    folder.chmod(0o000)
-    try:
+    with denied_socket_folder(state) as socket_path:
         env = _fence(tmp_path, state)
         rc, out, err = _run(monkeypatch, capsys, env, _credential(tmp_path))
-    finally:
-        folder.chmod(0o700)
     assert rc != 0 and out == ""
-    assert f"Outpost's socket at {gateway_socket_path(state)} is not reachable from here (permission denied)" in err
+    assert f"Outpost's socket at {socket_path} is not reachable from here (permission denied)" in err
     line = _failure_file(env, "sess-1").read_text()
     assert "not-reachable" in line and SECRET not in err + line
 

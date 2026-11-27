@@ -1022,7 +1022,7 @@ class _NoCodeRoute(Exception):
     """The daemon has no route that mints a one-time sign-in code."""
 
 
-def _mint_open_code(env: dict[str, str] | None, port: int, timeout: float) -> str:
+def _mint_open_code(env: dict[str, str] | None, timeout: float) -> str:
     """Read the operator credential and ask the daemon for a one-time code; :class:`_NoCodeRoute` when it has no
     such route (a daemon older than the sign-in code, which signs the browser in on its own; it answers 404, or
     403 ``human_action_requires_cookie`` where its cookie guard sits in front of the missing route)."""
@@ -1047,11 +1047,9 @@ def _mint_open_code(env: dict[str, str] | None, port: int, timeout: float) -> st
             env=env,
         )
     except outpost_http.OutpostUnreachable as exc:
-        raise OutpostLifecycleError(f"Outpost is unreachable at {exc.path}; is it running?") from None
+        raise OutpostLifecycleError(exc.message) from None
     except outpost_http.SocketNotReachable as exc:
-        raise OutpostLifecycleError(
-            f"Outpost's socket at {exc.path} is not reachable from here (permission denied)"
-        ) from None
+        raise OutpostLifecycleError(exc.message) from None
     if reply.status == 200 and isinstance(reply.body.get("code"), str):
         return reply.body["code"]
     if reply.status == 404 or (reply.status == 403 and reply.body.get("error") == "human_action_requires_cookie"):
@@ -1104,7 +1102,7 @@ def open_ui(
         )
 
     try:
-        code = _mint_open_code(env, port, health_timeout)
+        code = _mint_open_code(env, health_timeout)
     except _NoCodeRoute:
         url = f"http://{DAEMON_HOST}:{port}/"
         print("this outpost is older than the one-time sign-in code; opening its UI address directly")

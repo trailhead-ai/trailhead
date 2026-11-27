@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import json
 import subprocess
-import threading
 import time
 from http.server import BaseHTTPRequestHandler
 
 from trailhead.gateway import outpost_http
 
-from ._gateway_support import _UnixHTTPServer, gateway_socket_path, short_state_dir
+from ._gateway_support import short_state_dir, unix_http_server
 from ._gateway_e2e_support import (
     ArgumentSampler,
     TokenRecorder,
@@ -94,10 +93,7 @@ class _Origin(BaseHTTPRequestHandler):
 def test_the_token_recorder_relays_a_request_and_learns_the_tokens_both_ways(monkeypatch):
     state = short_state_dir()
     monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
-    (state / "gateway").mkdir(mode=0o700)
-    origin = _UnixHTTPServer(str(gateway_socket_path(state)), _Origin)
-    threading.Thread(target=origin.serve_forever, daemon=True).start()
-    try:
+    with unix_http_server(state, _Origin):
         with TokenRecorder(state) as recorder:
             reply = outpost_http.request(
                 "POST", "/broker/token", headers={"Authorization": "Bearer bearer-PLANTED-5c"}, form={"x": "y"}
@@ -106,9 +102,6 @@ def test_the_token_recorder_relays_a_request_and_learns_the_tokens_both_ways(mon
         assert reply.body["access_token"] == TOKEN, "the recorder did not relay the origin's answer"
         assert recorder.tokens == {TOKEN, "bearer-PLANTED-5c"}
         assert outpost_http.request("POST", "/broker/token", form={"x": "y"}).status == 200, "the socket was not put back"
-    finally:
-        origin.shutdown()
-        origin.server_close()
 
 
 def test_the_stored_run_logs_are_read_by_name_and_a_token_in_one_is_found(tmp_path):

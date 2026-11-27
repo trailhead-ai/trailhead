@@ -61,11 +61,9 @@ def _exchange(client_id: str, client_secret: str) -> str:
             timeout=TIMEOUT_SECONDS,
         )
     except outpost_http.OutpostUnreachable as err:
-        raise _Failure("unreachable", f"Outpost is unreachable at {err.path}; is it running?") from None
+        raise _Failure("unreachable", err.message) from None
     except outpost_http.SocketNotReachable as err:
-        raise _Failure(
-            "not-reachable", f"Outpost's socket at {err.path} is not reachable from here (permission denied)"
-        ) from None
+        raise _Failure("not-reachable", err.message) from None
     if 300 <= reply.status < 400:
         raise _Failure("redirect-refused")
     if reply.status != 200:

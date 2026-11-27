@@ -23,6 +23,7 @@ from trailhead.tests._gateway_support import (
     TOKEN,
     Cut,
     StubOutpost,
+    denied_socket_folder,
     gateway_socket_path,
     run_gateway_runner,
     short_state_dir,
@@ -1429,16 +1430,11 @@ class TestSocketFailures:
 
     @pytest.mark.skipif(os.geteuid() == 0, reason="root passes a folder's mode check, so no folder can deny it")
     def test_a_socket_the_operating_system_denies_says_it_is_not_reachable_from_here(self, state, cli):
-        folder = gateway_socket_path(state).parent
-        folder.mkdir(mode=0o700, parents=True)
-        folder.chmod(0o000)
-        try:
+        with denied_socket_folder(state) as socket_path:
             rc, out, err = cli("run", "list")
-        finally:
-            folder.chmod(0o700)
         assert (rc, out) == (2, "")
         assert err == (
-            f"outpost-gateway: Outpost's socket at {gateway_socket_path(state)} is not reachable from here "
+            f"outpost-gateway: Outpost's socket at {socket_path} is not reachable from here "
             "(permission denied)\n"
         )
 
