@@ -553,6 +553,21 @@ class TestSlugLockReap:
             "full teardown must reap the slug lockfile — it must not leak"
         )
 
+    def test_full_teardown_leaves_no_lock_of_its_own_in_the_lock_folder(self, inproc_group):
+        from camp.group.manifest import manifest_path_for
+        from camp.provision.reconcile import reconcile_break
+
+        g = inproc_group
+        _provision_inproc(g, "feat-gone")
+        _provision_inproc(g, "feat-stays")
+        locks = manifest_path_for("removegroup", "feat-gone", env=g["env"]).parent.parent / ".locks"
+        assert any(p.name.startswith("feat-gone") for p in locks.iterdir())
+
+        reconcile_break(g["group"], "feat-gone", env=g["env"])
+
+        left = sorted(p.name for p in locks.iterdir())
+        assert left and all(n.startswith("feat-stays") for n in left), left
+
     def test_partial_failure_keeps_lockfile(self, inproc_group, monkeypatch):
         import camp.provision.reconcile as reconcile
         from camp.group.manifest import manifest_path_for, lock_path_for
@@ -1194,3 +1209,107 @@ class TestCampRemoveWindowRecordDegradation:
             results[state] = (r.returncode, r.stdout, r.stderr)
 
         assert_identical_across_record_states(results, verb="remove", compare_stderr=True)
+
+
+def _plant_bad_locks_folder(remove_env) -> Path:
+    import shutil
+
+    locks = remove_env["state_dir"] / "rmgroup" / "worktrees" / ".locks"
+    shutil.rmtree(locks, ignore_errors=True)
+    locks.write_text("not a directory")
+    return locks
+
+
+def _plant_symlinked_slug_lock(remove_env, tmp_path: Path) -> Path:
+    locks = remove_env["state_dir"] / "rmgroup" / "worktrees" / ".locks"
+    locks.mkdir(exist_ok=True)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("precious")
+    (locks / "ws-slug.lock").unlink(missing_ok=True)
+    (locks / "ws-slug.lock").symlink_to(victim)
+    return victim
+
+
+class TestActivateRefusesBadLockPaths:
+    def test_a_regular_file_where_the_lock_folder_belongs_is_one_clean_line(self, remove_env):
+        locks = _plant_bad_locks_folder(remove_env)
+
+        r = _camp(remove_env, "activate", "repo_a", "--name", "ws-slug", "--group", "rmgroup")
+
+        assert r.returncode == 1, r.stderr
+        assert "Traceback" not in r.stderr, r.stderr
+        assert r.stderr.startswith("camp activate: "), r.stderr
+        assert "is a regular file" in r.stderr and str(locks) in r.stderr, r.stderr
+        assert len(r.stderr.strip().splitlines()) == 1, r.stderr
+
+    def test_a_symlinked_lock_file_is_one_clean_line_and_its_target_untouched(
+        self, remove_env, tmp_path
+    ):
+        victim = _plant_symlinked_slug_lock(remove_env, tmp_path)
+
+        r = _camp(remove_env, "activate", "repo_a", "--name", "ws-slug", "--group", "rmgroup")
+
+        assert r.returncode == 1, r.stderr
+        assert "Traceback" not in r.stderr, r.stderr
+        assert r.stderr.startswith("camp activate: "), r.stderr
+        assert "is a symlink" in r.stderr, r.stderr
+        assert victim.read_text() == "precious"
+
+    def test_a_symlinked_member_guard_lock_is_one_clean_line(self, remove_env, tmp_path):
+        group_toml = remove_env["config_dir"] / "groups" / "rmgroup.toml"
+        group_toml.write_text(
+            f'''[group]
+name = "rmgroup"
+
+[[members]]
+name = "repo_a"
+repo_root = "{remove_env["repo_a"]}"
+tasks = ["hook"]
+
+[[members]]
+name = "repo_b"
+repo_root = "{remove_env["repo_b"]}"
+
+[tasks.hook]
+phase = "activate"
+required = true
+
+[[tasks.hook.steps]]
+name = "noop"
+cmd = ["true"]
+'''
+        )
+        locks = remove_env["state_dir"] / "rmgroup" / "worktrees" / ".locks"
+        victim = tmp_path / "victim.txt"
+        victim.write_text("precious")
+        (locks / "ws-slug.repo_a.activate.lock").symlink_to(victim)
+
+        r = _camp(remove_env, "activate", "repo_a", "--name", "ws-slug", "--group", "rmgroup")
+
+        assert r.returncode == 1, r.stderr
+        assert "Traceback" not in r.stderr, r.stderr
+        assert r.stderr.startswith("camp activate: "), r.stderr
+        assert "is a symlink" in r.stderr, r.stderr
+        assert victim.read_text() == "precious"
+
+
+class TestRemoveReapsSymlinkedMemberLocks:
+    def test_a_symlinked_member_lock_is_unlinked_as_a_link_and_the_rest_are_cleared(
+        self, remove_env, tmp_path
+    ):
+        locks = remove_env["state_dir"] / "rmgroup" / "worktrees" / ".locks"
+        victim = tmp_path / "victim.txt"
+        victim.write_text("precious")
+        link = locks / "ws-slug.repo_a.activate.lock"
+        link.symlink_to(victim)
+        regular = locks / "ws-slug.repo_b.activate.lock"
+        regular.write_text("")
+
+        r = _camp(remove_env, "remove", "ws-slug", "--group", "rmgroup")
+
+        assert r.returncode == 0, r.stderr
+        assert "Traceback" not in r.stderr, r.stderr
+        assert not _manifest_path(remove_env).exists()
+        assert not link.is_symlink() and not link.exists()
+        assert not regular.exists()
+        assert victim.read_text() == "precious"

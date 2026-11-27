@@ -420,3 +420,36 @@ class TestRenderChanges:
         assert "\x1b" not in lines[0]
         assert "\\x0d" in lines[0]
         assert "\\x1b" in lines[0]
+
+
+class TestBadLockPathIsNotReconciled:
+    def test_a_regular_file_where_the_lock_folder_belongs_is_not_reconciled(self, tmp_path):
+        from camp.launch.window_reconcile import NotReconciled, reconcile_workspace_record
+
+        ws_dir = tmp_path / "ws"
+        ws_dir.mkdir()
+        (tmp_path / ".locks").write_text("in the way")
+
+        outcome = reconcile_workspace_record(ws_dir, "sess", object())
+
+        assert isinstance(outcome, NotReconciled)
+        assert "is a regular file" in outcome.reason
+        assert str(tmp_path / ".locks") in outcome.reason
+
+    def test_a_symlinked_lock_file_is_not_reconciled(self, tmp_path):
+        from camp.group.manifest import lock_path_for
+        from camp.launch.window_reconcile import NotReconciled, reconcile_workspace_record
+
+        ws_dir = tmp_path / "ws"
+        ws_dir.mkdir()
+        victim = tmp_path / "victim.txt"
+        victim.write_text("precious")
+        lock_path = lock_path_for(ws_dir)
+        lock_path.parent.mkdir()
+        lock_path.symlink_to(victim)
+
+        outcome = reconcile_workspace_record(ws_dir, "sess", object())
+
+        assert isinstance(outcome, NotReconciled)
+        assert "is a symlink" in outcome.reason
+        assert victim.read_text() == "precious"

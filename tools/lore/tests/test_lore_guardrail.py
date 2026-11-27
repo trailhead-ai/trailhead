@@ -1,6 +1,8 @@
-"""Tests for the vault write-protection guardrail.
+"""Tests for the vault file-edit guard.
 
-The guardrail is a path-canonicalizing PreToolUse hook (``hooks/vault-guard.py``)
+The guard guards the harness's file-edit tools only: Bash-mediated writes to a
+vault are not mechanically blocked, apart from the hub-session ``.git/config``,
+``.git/hooks`` and ``.git/info`` sandbox denies. It is a path-canonicalizing PreToolUse hook (``hooks/vault-guard.py``)
 that denies Write/Edit targeting paths under ``$XDG_STATE_HOME/lore/vaults/**``
 **and** the resolved real target of the ``default`` symlink. Symlink resolution
 happens at hook EXECUTION time, not install time, so a
@@ -72,7 +74,7 @@ GUARD_ROOT_DELIM = "\n"
 GUARD_EXEMPT_DELIM = "\n"
 
 
-def _run_guard(file_path, guard_roots, *, tool_name="Write", payload=None, exempt=None):
+def _run_guard(file_path, guard_roots, *, tool_name="Write", payload=None, exempt=None, env_extra=None, cwd=None):
     """Invoke the real guard hook with the given file_path, roots and exemptions.
 
     ``exempt=None`` removes ``LORE_VAULT_GUARD_EXEMPT`` from the child env
@@ -85,12 +87,15 @@ def _run_guard(file_path, guard_roots, *, tool_name="Write", payload=None, exemp
         env.pop("LORE_VAULT_GUARD_EXEMPT", None)
     else:
         env["LORE_VAULT_GUARD_EXEMPT"] = GUARD_EXEMPT_DELIM.join(str(p) for p in exempt)
+    if env_extra:
+        env.update(env_extra)
     return subprocess.run(
         [sys.executable, str(GUARD_SCRIPT)],
         input=payload if payload is not None else _make_payload(str(file_path), tool_name),
         capture_output=True,
         text=True,
         env=env,
+        cwd=cwd,
     )
 
 
@@ -329,6 +334,115 @@ class TestGuardHookSymlinkResolution:
 # ===========================================================================
 # 2b. Security-audit fixes (hardening)
 # ===========================================================================
+
+
+class TestGuardPathForms:
+    """The guard judges a path the way a write would land: a target is refused
+    when ANY of its forms (the lexically normalized, `~`-expanded absolute path,
+    and the realpath of that) sits in a protected part of a vault, and exempt only
+    when every form inside a vault is exempt."""
+
+    def _vaults(self, tmp_path):
+        vaults_root = tmp_path / "vaults"
+        vault = vaults_root / "default"
+        vault.mkdir(parents=True)
+        return vaults_root, vault
+
+    @pytest.mark.parametrize("protected", ["task/r.md", ".lore.lock", ".gitignore", ".git/config"])
+    def test_dotdot_through_a_sites_symlink_into_a_protected_path_is_denied(self, tmp_path, protected):
+        vaults_root, vault = self._vaults(tmp_path)
+        outside = tmp_path / "elsewhere" / "deep"
+        outside.mkdir(parents=True)
+        (vault / "sites").symlink_to(outside)
+        target = f"{vault}/sites/../{protected}"
+
+        result = _run_guard(target, [vaults_root], exempt=[f"{vaults_root}/*/sites"])
+
+        assert result.returncode == 2, result.stderr
+        assert "refusing to write" in result.stderr
+
+    def test_tilde_path_is_expanded_before_it_is_judged(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        record_dir = vault / "task"
+        record_dir.mkdir()
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+
+        result = _run_guard(
+            "~/r.md", [vaults_root], env_extra={"HOME": str(record_dir)}, cwd=cwd
+        )
+
+        assert result.returncode == 2, result.stderr
+
+    def test_tilde_path_into_sites_is_still_allowed(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        zone = vault / "sites" / "demo"
+        zone.mkdir(parents=True)
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+
+        result = _run_guard(
+            "~/index.html",
+            [vaults_root],
+            exempt=[f"{vaults_root}/*/sites"],
+            env_extra={"HOME": str(zone)},
+            cwd=cwd,
+        )
+
+        assert result.returncode == 0, result.stderr
+
+    def test_dotdot_that_stays_inside_sites_is_allowed(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        (vault / "sites" / "a").mkdir(parents=True)
+
+        result = _run_guard(
+            f"{vault}/sites/a/../b/index.html",
+            [vaults_root],
+            exempt=[f"{vaults_root}/*/sites"],
+        )
+
+        assert result.returncode == 0, result.stderr
+
+    def test_a_form_outside_every_vault_is_not_judged_protected(self, tmp_path):
+        vaults_root, vault = self._vaults(tmp_path)
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+        (vault / "sites").symlink_to(outside)
+
+        result = _run_guard(
+            f"{vault}/sites/page.html", [vaults_root], exempt=[f"{vaults_root}/*/sites"]
+        )
+
+        assert result.returncode == 0, result.stderr
+
+
+class TestGuardFailsClosedOnAnUnjudgeablePath:
+    """A path the guard cannot judge is refused (exit 2 with a stderr reason),
+    never a traceback (exit 1) and never a silent allow."""
+
+    @pytest.mark.parametrize(
+        "tool_input",
+        [
+            {"file_path": "/x/a\x00b"},
+            {"notebook_path": "/x/a\x00b"},
+            {"file_path": 5},
+            {"file_path": ["a"]},
+            {"file_path": {"a": 1}},
+            {"notebook_path": 7},
+            {"file_path": "/ok/path", "notebook_path": ["x"]},
+        ],
+        ids=["nul-file", "nul-notebook", "int", "list", "dict", "int-notebook", "bad-second-key"],
+    )
+    def test_refused_with_a_reason(self, tmp_path, tool_input):
+        vault = tmp_path / "vaults" / "default"
+        vault.mkdir(parents=True)
+        payload = json.dumps({"tool_name": "Write", "tool_input": tool_input})
+
+        result = _run_guard("", [vault.parent], payload=payload)
+
+        assert result.returncode == 2, (result.returncode, result.stderr)
+        assert "lore vault guard: refusing" in result.stderr
+        assert "Traceback" not in result.stderr
 
 
 class TestGuardToolCoverage:
@@ -1091,43 +1205,9 @@ class TestInitInstallsGuardrail:
             assert "MultiEdit" in m, f"matcher must cover MultiEdit, got {m!r}"
             assert "NotebookEdit" in m, f"matcher must cover NotebookEdit, got {m!r}"
 
-    def test_init_adds_static_permission_deny(self, tmp_path):
-        """Defense-in-depth: a coarse permissions.deny over the vaults subtree,
-        using the // double-slash absolute-path grammar."""
-        state, config, home = _dirs(tmp_path)
-        res = _run_init(["init"], state=state, config=config, home=home)
-        assert res.returncode == 0, res.stderr
-
-        _, data = self._read_user_settings(home)
-        deny = data.get("permissions", {}).get("deny", [])
-        assert any("//" in r and "vaults" in r for r in deny), (
-            f"expected a //abs vaults static deny rule, got {deny!r}"
-        )
-
-    def test_init_adds_edit_deny_only(self, tmp_path):
-        """Every static deny is an Edit( rule (Edit(path) rules cover all
-        file-editing tools; a Write(path) rule never matches and makes Claude
-        Code warn at startup), anchored with the // double-slash absolute
-        grammar. What that rule set contains is pinned separately by
-        ``TestInitKindGeneratedDenyList``."""
-        state, config, home = _dirs(tmp_path)
-        res = _run_init(["init"], state=state, config=config, home=home)
-        assert res.returncode == 0, res.stderr
-
-        _, data = self._read_user_settings(home)
-        deny = data.get("permissions", {}).get("deny", [])
-        write_rules = [r for r in deny if r.startswith("Write(//") and "vaults" in r]
-        edit_rules = [r for r in deny if r.startswith("Edit(//") and "vaults" in r]
-        assert edit_rules, f"missing Edit(//…vaults/**) static deny: {deny!r}"
-        assert not write_rules, f"unmatched Write(//…) rule present: {deny!r}"
-
     def test_init_adds_bash_lore_permission_allow(self, tmp_path):
-        """The install is symmetric: the CLI the deny rules force every write
-        through must itself be sanctioned, via a fixed blanket allow rule —
-        and adding it leaves permissions.deny exactly what a fresh install's
-        generated deny list would be on its own, independently derived here
-        from the record model's kinds rather than read back from the same
-        install run."""
+        """The vault-guard hook forces vault writes through the CLI, so the CLI
+        itself must be sanctioned, via a fixed blanket allow rule."""
         state, config, home = _dirs(tmp_path)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
@@ -1137,20 +1217,6 @@ class TestInitInstallsGuardrail:
         assert "Bash(lore:*)" in allow, f"expected Bash(lore:*) allow rule, got {allow!r}"
         deny = data.get("permissions", {}).get("deny", [])
         assert "Bash(lore:*)" not in deny
-
-        vaults = state / "lore" / "vaults"
-        prefix = f"//{str(vaults).lstrip('/')}"
-        kinds = load_script("lore.record.model").KINDS
-        lock_name = load_script("lore.locking").VAULT_LOCK_NAME
-        expected_deny = (
-            {f"Edit({prefix}/*/{kind}/**)" for kind in kinds}
-            | {f"Edit({prefix}/*/.git/**)"}
-            | {f"Edit({prefix}/*/{name})" for name in (".gitignore", lock_name)}
-        )
-        assert set(deny) == expected_deny, (
-            f"unexpected extra or missing deny rules after adding the allow "
-            f"rule: {sorted(set(deny) ^ expected_deny)!r}"
-        )
 
     def test_init_removes_legacy_blanket_denies(self, tmp_path):
         """The two blanket rules an earlier install could leave behind are
@@ -1171,21 +1237,20 @@ class TestInitInstallsGuardrail:
         legacy = [f"Write({blanket})", f"Edit({blanket})"]
 
         settings, data = self._read_user_settings(home)
-        data["permissions"]["deny"][:0] = legacy
+        data.setdefault("permissions", {}).setdefault("deny", [])[:0] = legacy
         settings.write_text(json.dumps(data))
 
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
         _, data = self._read_user_settings(home)
-        deny = data["permissions"]["deny"]
+        deny = data.get("permissions", {}).get("deny", [])
         for rule in legacy:
             assert rule not in deny, f"legacy blanket rule not removed: {rule!r}"
-        assert _vault_deny_rules(deny, vaults), f"deny list emptied out: {deny!r}"
+        assert not _vault_deny_rules(deny, vaults), f"vault deny rules left: {deny!r}"
 
     def test_rerun_installs_no_duplicate_guard(self, tmp_path):
         state, config, home = _dirs(tmp_path)
         _run_init(["init"], state=state, config=config, home=home)
-        _, first = self._read_user_settings(home)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
 
@@ -1193,14 +1258,6 @@ class TestInitInstallsGuardrail:
         cmds = self._pretooluse_commands(data)
         guard_cmds = [c for c in cmds if "vault-guard" in c]
         assert len(guard_cmds) == 1, f"re-run duplicated the guard entry: {guard_cmds!r}"
-        deny = data.get("permissions", {}).get("deny", [])
-        vault_denies = [r for r in deny if "vaults" in r]
-        assert vault_denies == list(dict.fromkeys(vault_denies)), (
-            f"re-run duplicated a deny rule: {vault_denies!r}"
-        )
-        assert vault_denies == [
-            r for r in first["permissions"]["deny"] if "vaults" in r
-        ], f"re-run changed the deny rules: {vault_denies!r}"
         allow = data.get("permissions", {}).get("allow", [])
         assert allow.count("Bash(lore:*)") == 1, (
             f"re-run duplicated the allow rule: {allow!r}"
@@ -1278,111 +1335,113 @@ class TestInitInstallsGuardrail:
 # ===========================================================================
 
 
-class TestInitKindGeneratedDenyList:
-    """``lore init`` denies each record tree by name instead of denying the
-    whole vaults subtree.
+class TestInitWritesNoVaultDenyRules:
+    """``lore init`` leaves every path the lore CLI writes unblocked.
 
-    A blanket ``Edit(//<vaults_root>/**)`` matches the vaults directory itself,
-    and a deny that matches a directory cascades to everything beneath it with
-    no way to pierce it — so it would re-block the sites zone the hook exempts.
-    The generated list therefore names one rule per record kind plus a literal
-    rule per file lore scaffolds at a vault root, and nothing that can match a
-    directory at the vault root.
+    The harness turns an ``Edit(path)`` deny rule into a write deny for the
+    Bash sandbox, and a deny beats ``sandbox.filesystem.allowWrite`` — so a
+    rule over a vault's ``.lore.lock`` or ``session/`` breaks ``lore record
+    update`` and ``lore session candidate`` in a sandboxed session. The
+    PreToolUse hook is what keeps hand edits out of the vault.
     """
 
-    def _install(self, tmp_path):
-        """Run a clean ``lore init`` and return (vaults_root, generated rules)."""
+    LORE_WRITES = (
+        ".lore.lock",
+        "session/2026/note.md",
+        "session/2026/.note.md.tmp",
+        "adr/some-decision.md",
+        "task/some-task.md",
+        ".gitignore",
+        ".git/index.lock",
+        "sites/demo/index.html",
+    )
+
+    def _earlier_init_rules(self, vaults):
+        kinds = load_script("lore.record.model").KINDS
+        prefix = f"//{str(vaults).lstrip('/')}"
+        return (
+            [f"Edit({prefix}/*/{kind}/**)" for kind in sorted(kinds)]
+            + [f"Edit({prefix}/*/.git/**)"]
+            + [f"Edit({prefix}/*/{name})" for name in (".gitignore", ".lore.lock")]
+        )
+
+    def _blocking(self, deny, vaults, rel):
+        path = f"{vaults}/default/{rel}"
+        return [r for r in deny if r.startswith("Edit(//") and _rule_denies(r, path)]
+
+    @pytest.mark.parametrize("rel", LORE_WRITES)
+    def test_fresh_init_blocks_no_path_lore_writes(self, tmp_path, rel):
         state, config, home = _dirs(tmp_path)
         res = _run_init(["init"], state=state, config=config, home=home)
         assert res.returncode == 0, res.stderr
+
         data = json.loads((home / ".claude" / "settings.json").read_text())
+        deny = data.get("permissions", {}).get("deny", [])
         vaults = state / "lore" / "vaults"
-        return vaults, _vault_deny_rules(data["permissions"]["deny"], vaults)
-
-    def _kinds(self):
-        return load_script("lore.record.model").KINDS
-
-    def test_one_deny_per_record_kind(self, tmp_path):
-        """The rule set is derived from the record model's kind set, so a kind
-        added to the model shows up in the rendered rules on the next install —
-        and a hand-maintained list that drifted from it fails here."""
-        vaults, rules = self._install(tmp_path)
-        prefix = f"Edit(//{str(vaults).lstrip('/')}/*/"
-        denied_trees = {
-            r[len(prefix) : -len("/**)")] for r in rules if r.endswith("/**)")
-        }
-        assert denied_trees == set(self._kinds()) | {".git"}, (
-            f"the denied subtrees must be exactly the record model's kinds plus "
-            f"the vault's own .git dir; got {sorted(denied_trees)!r}"
+        assert not self._blocking(deny, vaults, rel), (
+            f"{rel} is blocked by {self._blocking(deny, vaults, rel)!r}"
         )
 
-    def test_vault_git_dir_is_denied(self, tmp_path):
-        """A vault root's ``.git`` is not a record tree, but ``.git/hooks/*`` is
-        executable code that runs on every vault operation — it needs its own
-        rule, since the sites carve-out means nothing broader can cover it."""
-        vaults, rules = self._install(tmp_path)
-        prefix = f"//{str(vaults).lstrip('/')}"
-        assert f"Edit({prefix}/*/.git/**)" in rules, (
-            f"missing the vault .git deny rule; got {rules!r}"
-        )
-
-    def test_vault_root_files_are_denied_by_literal_rule(self, tmp_path):
-        """The files lore scaffolds at a vault root are named outright: a
-        directory-capable catch-all (``…/*/*``) would cascade over the sites
-        zone as well."""
-        vaults, rules = self._install(tmp_path)
-        prefix = f"//{str(vaults).lstrip('/')}"
-        lock_name = load_script("lore.locking").VAULT_LOCK_NAME
-        for name in (".gitignore", lock_name):
-            assert f"Edit({prefix}/*/{name})" in rules, (
-                f"missing literal vault-root deny for {name}; got {rules!r}"
+    @pytest.mark.parametrize("rel", LORE_WRITES)
+    def test_rerun_unblocks_paths_an_earlier_init_blocked(self, tmp_path, rel):
+        state, config, home = _dirs(tmp_path)
+        vaults = state / "lore" / "vaults"
+        settings = home / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        old = self._earlier_init_rules(vaults)
+        settings.write_text(
+            json.dumps(
+                {"permissions": {"deny": ["Bash(curl:*)", *old], "allow": ["Read(*)"]}}
             )
-        assert f"Edit({prefix}/*/*)" not in rules, (
-            "a vault-root catch-all matches the sites directory itself and "
-            f"cascades over everything in it; got {rules!r}"
+        )
+        assert any(
+            self._blocking(old, vaults, r) for r in (".lore.lock", "session/2026/note.md")
+        ), "fixture must start out blocking lore's paths"
+
+        res = _run_init(["init"], state=state, config=config, home=home)
+        assert res.returncode == 0, res.stderr
+
+        deny = json.loads(settings.read_text())["permissions"]["deny"]
+        assert not self._blocking(deny, vaults, rel), (
+            f"{rel} still blocked by {self._blocking(deny, vaults, rel)!r}"
         )
 
-    def test_the_rule_set_is_exactly_the_kinds_plus_git_plus_the_root_files(self, tmp_path):
-        vaults, rules = self._install(tmp_path)
-        prefix = f"//{str(vaults).lstrip('/')}"
-        expected = (
-            {f"Edit({prefix}/*/{kind}/**)" for kind in self._kinds()}
-            | {f"Edit({prefix}/*/.git/**)"}
-            | {f"Edit({prefix}/*/{name})" for name in (".gitignore", ".lore.lock")}
-        )
-        assert set(rules) == expected, (
-            f"unexpected extra or missing deny rules: {sorted(set(rules) ^ expected)!r}"
-        )
-
-    def test_no_generated_rule_matches_a_sites_path(self, tmp_path):
-        """The whole point of the restructure: nothing in the generated list may
-        block the free-write zone, directly or by cascading over a parent."""
-        vaults, rules = self._install(tmp_path)
-        vault = f"{vaults}/default"
-        for path in (
-            f"{vault}/sites",
-            f"{vault}/sites/demo",
-            f"{vault}/sites/demo/index.html",
-            f"{vault}/sites/demo/assets/app.js",
-            f"{vault}/sites/demo/.well-known/probe.txt",
-        ):
-            blocking = [r for r in rules if _rule_denies(r, path)]
-            assert not blocking, f"{path} is blocked by {blocking!r}"
-
-    def test_record_trees_and_root_files_are_still_blocked(self, tmp_path):
-        """Positive control: the same evaluation must show the rules biting
-        everywhere they are supposed to, or the test above proves nothing."""
-        vaults, rules = self._install(tmp_path)
-        vault = f"{vaults}/default"
-        for path in (
-            f"{vault}/adr/some-decision.md",
-            f"{vault}/task/some-task.md",
-            f"{vault}/session/2026/note.md",
-            f"{vault}/.gitignore",
-            f"{vault}/.lore.lock",
-            f"{vault}/.git/hooks/pre-commit",
-            f"{vault}/.git/config",
-        ):
-            assert any(_rule_denies(r, path) for r in rules), (
-                f"{path} must stay denied; rules={rules!r}"
+    def test_rerun_keeps_the_operators_other_permission_rules(self, tmp_path):
+        state, config, home = _dirs(tmp_path)
+        vaults = state / "lore" / "vaults"
+        settings = home / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        mine = ["Bash(curl:*)", "Edit(//home/me/secrets/**)", "Read(//etc/shadow)"]
+        settings.write_text(
+            json.dumps(
+                {
+                    "permissions": {
+                        "deny": [*mine, *self._earlier_init_rules(vaults)],
+                        "allow": ["Read(*)"],
+                    }
+                }
             )
+        )
+
+        res = _run_init(["init"], state=state, config=config, home=home)
+        assert res.returncode == 0, res.stderr
+
+        perms = json.loads(settings.read_text())["permissions"]
+        assert perms["deny"] == mine
+        assert "Read(*)" in perms["allow"]
+        assert "Bash(lore:*)" in perms["allow"]
+
+    def test_hook_still_refuses_a_record_edit_after_init(self, tmp_path):
+        state, config, home = _dirs(tmp_path)
+        res = _run_init(["init"], state=state, config=config, home=home)
+        assert res.returncode == 0, res.stderr
+
+        data = json.loads((home / ".claude" / "settings.json").read_text())
+        roots = data["env"]["LORE_VAULT_GUARD_ROOT"].split(GUARD_ROOT_DELIM)
+        exempt = data["env"]["LORE_VAULT_GUARD_EXEMPT"].split(GUARD_EXEMPT_DELIM)
+        vault = state / "lore" / "vaults" / "default"
+
+        refused = _run_guard(vault / "adr" / "x.md", roots, tool_name="Edit", exempt=exempt)
+        assert refused.returncode == 2, refused.stderr
+        allowed = _run_guard(vault / "sites" / "a" / "index.html", roots, exempt=exempt)
+        assert allowed.returncode == 0, allowed.stderr

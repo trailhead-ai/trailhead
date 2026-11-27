@@ -144,7 +144,9 @@ def test_the_bound_is_one_deadline_across_a_reaped_lockfile_retry(tmp_path: Path
         return real_stat(path, *args, **kwargs)
 
     monkeypatch.setattr(manifest, "time", types.SimpleNamespace(monotonic=lambda: clock["now"], sleep=fake_sleep))
-    monkeypatch.setattr(manifest, "os", types.SimpleNamespace(stat=fake_stat, fstat=os.fstat))
+    scripted_os = types.SimpleNamespace(**{name: getattr(os, name) for name in dir(os)})
+    scripted_os.stat = fake_stat
+    monkeypatch.setattr(manifest, "os", scripted_os)
     monkeypatch.setattr(
         manifest,
         "fcntl",
@@ -157,3 +159,143 @@ def test_the_bound_is_one_deadline_across_a_reaped_lockfile_retry(tmp_path: Path
 
     assert state["reaped"] is True
     assert clock["now"] < 1.2, clock["now"]
+
+
+def test_the_slug_lock_lives_in_the_locks_folder_and_outlasts_the_workspace_dir(tmp_path: Path) -> None:
+    """The lock sits in <worktrees-root>/.locks, created on first acquire, and a
+    teardown that removes the workspace dir never removes the held inode: a
+    second acquirer is still excluded afterwards."""
+    import shutil
+
+    from camp.group.manifest import LockTimeout, reconcile_lock
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    expected = worktrees / ".locks" / "feat-x.lock"
+    assert not expected.parent.exists()
+
+    with reconcile_lock(ws_dir):
+        assert expected.is_file()
+        held_inode = os.stat(expected).st_ino
+        shutil.rmtree(ws_dir)
+        assert os.stat(expected).st_ino == held_inode
+        with pytest.raises(LockTimeout):
+            with reconcile_lock(ws_dir, timeout=0.2):
+                pass
+
+
+def test_reaping_the_slug_lock_removes_only_that_slugs_lock(tmp_path: Path) -> None:
+    from camp.group.manifest import reap_lock_unlocked, reconcile_lock
+
+    worktrees = tmp_path / "worktrees"
+    mine, other = worktrees / "mine", worktrees / "other"
+    mine.mkdir(parents=True)
+    other.mkdir()
+    with reconcile_lock(other):
+        with reconcile_lock(mine):
+            reap_lock_unlocked(mine)
+
+    assert sorted(p.name for p in (worktrees / ".locks").iterdir()) == ["other.lock"]
+
+
+def _planted_target(tmp_path: Path) -> Path:
+    target = tmp_path / "victim.txt"
+    target.write_text("precious")
+    return target
+
+
+def test_a_symlinked_lock_file_is_refused_and_its_target_left_untouched(tmp_path: Path) -> None:
+    from camp.group.manifest import LockPathError, lock_path_for, reconcile_lock
+
+    ws_dir = tmp_path / "worktrees" / "ws"
+    ws_dir.mkdir(parents=True)
+    target = _planted_target(tmp_path)
+    lock_path = lock_path_for(ws_dir)
+    lock_path.parent.mkdir()
+    lock_path.symlink_to(target)
+
+    with pytest.raises(LockPathError, match="symlink") as excinfo:
+        with reconcile_lock(ws_dir):
+            pytest.fail("lock was acquired through a symlink")
+
+    assert str(lock_path) in str(excinfo.value)
+    assert target.read_text() == "precious"
+
+
+def test_acquiring_an_existing_lock_file_does_not_truncate_it(tmp_path: Path) -> None:
+    from camp.group.manifest import lock_path_for, reconcile_lock
+
+    ws_dir = tmp_path / "worktrees" / "ws"
+    ws_dir.mkdir(parents=True)
+    lock_path = lock_path_for(ws_dir)
+    lock_path.parent.mkdir()
+    lock_path.write_text("keep")
+
+    with reconcile_lock(ws_dir):
+        pass
+
+    assert lock_path.read_text() == "keep"
+
+
+@pytest.mark.parametrize("shape", ["file", "symlink-to-dir", "dangling-symlink"])
+def test_a_lock_folder_that_is_not_a_real_directory_is_refused(tmp_path: Path, shape: str) -> None:
+    from camp.group.manifest import LockPathError, reconcile_lock
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "ws"
+    ws_dir.mkdir(parents=True)
+    locks = worktrees / ".locks"
+    if shape == "file":
+        locks.write_text("x")
+    elif shape == "symlink-to-dir":
+        (tmp_path / "elsewhere").mkdir()
+        locks.symlink_to(tmp_path / "elsewhere")
+    else:
+        locks.symlink_to(tmp_path / "nowhere")
+
+    with pytest.raises(LockPathError, match="delete") as excinfo:
+        with reconcile_lock(ws_dir):
+            pytest.fail("lock was acquired in a lock folder that is not a directory")
+
+    assert str(locks) in str(excinfo.value)
+    assert not (tmp_path / "elsewhere" / "ws.lock").exists()
+
+
+def test_a_missing_lock_folder_is_created_private(tmp_path: Path) -> None:
+    from camp.group.manifest import reconcile_lock
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "ws"
+    ws_dir.mkdir(parents=True)
+
+    with reconcile_lock(ws_dir):
+        pass
+
+    assert (worktrees / ".locks").stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize(
+    "shape, phrase",
+    [("file", "is a regular file"), ("symlink", "is a symlink"), ("fifo", "is not a directory")],
+)
+def test_the_lock_folder_refusal_says_what_is_actually_there(
+    tmp_path: Path, shape: str, phrase: str
+) -> None:
+    from camp.group.manifest import LockPathError, reconcile_lock
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    locks = tmp_path / ".locks"
+    if shape == "file":
+        locks.write_text("x")
+    elif shape == "symlink":
+        locks.symlink_to(tmp_path / "nowhere")
+    else:
+        os.mkfifo(locks)
+
+    with pytest.raises(LockPathError) as excinfo:
+        with reconcile_lock(ws_dir):
+            pytest.fail("lock was acquired in a lock folder that is not a directory")
+
+    assert phrase in str(excinfo.value)

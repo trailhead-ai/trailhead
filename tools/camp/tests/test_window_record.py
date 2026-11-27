@@ -994,3 +994,35 @@ class TestRestampWindowEntries:
         assert str(path) in outcome.reason
         assert "No space left on device" in outcome.reason
         assert path.read_bytes() == original_bytes
+
+
+class TestRestampWithBadLockPath:
+    def test_a_regular_file_where_the_lock_folder_belongs_is_not_restamped(self, tmp_path):
+        from camp.group.window_record import NotRestamped, restamp_window_entries
+
+        ws_dir = tmp_path / "ws"
+        ws_dir.mkdir()
+        (tmp_path / ".locks").write_text("in the way")
+
+        outcome = restamp_window_entries(ws_dir, {}, remove=set(), lock_timeout=None)
+
+        assert isinstance(outcome, NotRestamped)
+        assert "is a regular file" in outcome.reason
+
+    def test_a_symlinked_lock_file_is_not_restamped(self, tmp_path):
+        from camp.group.manifest import lock_path_for
+        from camp.group.window_record import NotRestamped, restamp_window_entries
+
+        ws_dir = tmp_path / "ws"
+        ws_dir.mkdir()
+        victim = tmp_path / "victim.txt"
+        victim.write_text("precious")
+        lock_path = lock_path_for(ws_dir)
+        lock_path.parent.mkdir()
+        lock_path.symlink_to(victim)
+
+        outcome = restamp_window_entries(ws_dir, {}, remove=set(), lock_timeout=None)
+
+        assert isinstance(outcome, NotRestamped)
+        assert "is a symlink" in outcome.reason
+        assert victim.read_text() == "precious"

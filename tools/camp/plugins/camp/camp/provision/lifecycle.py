@@ -16,6 +16,8 @@ cmd_sync_group(group, env):
 
 from __future__ import annotations
 
+import os
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -43,6 +45,21 @@ from ..launch.naming import workspace_session_name
 from ..launch.tmux import Tmux, _Unanswered
 
 
+def _is_workspace_dir(entry: Path) -> bool:
+    """True for a directory entry that could be a workspace: its name is a valid
+    camp slug and it is a real directory (not a symlink). Anything else under a
+    worktrees root — the `.locks` folder, a planted decoy — is never a workspace,
+    whatever files it holds."""
+    from ..spine import _VALID_SLUG_RE  # lazy: spine imports the CLI parser
+
+    if _VALID_SLUG_RE.fullmatch(entry.name) is None:
+        return False
+    try:
+        return stat.S_ISDIR(os.lstat(entry).st_mode)
+    except OSError:
+        return False
+
+
 def _list_group_worktrees(
     group: dict[str, Any],
     env: dict[str, str] | None = None,
@@ -57,6 +74,8 @@ def _list_group_worktrees(
         return results
 
     for entry in sorted(worktrees_dir.iterdir()):
+        if not _is_workspace_dir(entry):
+            continue
         mpath = entry / "manifest.json"
         if mpath.is_file():
             results.append((entry.name, mpath))
@@ -104,7 +123,7 @@ def host_claimed_session_names(*, env: dict[str, str] | None = None) -> set[str]
         if not worktrees_dir.is_dir():
             continue
         for entry in sorted(worktrees_dir.iterdir()):
-            if (entry / "manifest.json").is_file():
+            if _is_workspace_dir(entry) and (entry / "manifest.json").is_file():
                 names.add(workspace_session_name(group_dir.name, entry.name))
     return names
 

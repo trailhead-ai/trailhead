@@ -1503,6 +1503,7 @@ def test_guard_reap_skips_lockfile_currently_held(tmp_path: Path) -> None:
     member_name = "myrepo"
 
     lock_path = activation.member_guard_lock_path(ws_dir, member_name)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     holder_fd = open(str(lock_path), "w")
     fcntl.flock(holder_fd.fileno(), fcntl.LOCK_EX)
     try:
@@ -1522,6 +1523,7 @@ def test_guard_reap_removes_lockfile_when_free(tmp_path: Path) -> None:
     member_name = "myrepo"
 
     lock_path = activation.member_guard_lock_path(ws_dir, member_name)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text("")
     assert lock_path.exists()
 
@@ -1633,6 +1635,7 @@ def test_reconcile_break_reaps_member_guard_lockfiles_on_full_teardown(
     # A leaked lockfile from a completed (and never-reaped, pre-this-slice)
     # activate run — guard currently free.
     lock_path = activation.member_guard_lock_path(ws_dir, member_name)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text("")
     assert lock_path.exists()
 
@@ -2220,3 +2223,94 @@ def test_activate_stdout_strategy_prints_full_doc(tmp_path: Path, capsys) -> Non
     # Nothing enqueued under stdout strategy.
     qdir = queue_dir_for(central_queue_dir(group_name, slug, env=env))
     assert not qdir.exists() or list(qdir.iterdir()) == []
+
+
+def test_member_guard_lock_lives_in_the_locks_folder_and_outlasts_the_workspace_dir(tmp_path: Path) -> None:
+    """The activate guard sits in <worktrees-root>/.locks (created on first
+    acquire); removing the workspace dir does not remove it, so a second
+    acquirer is still refused."""
+    import shutil
+
+    import camp.provision.activation as activation
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    expected = worktrees / ".locks" / "feat-x.repo_a.activate.lock"
+    assert not expected.parent.exists()
+
+    fd = activation._try_acquire_member_guard(ws_dir, "repo_a")
+    try:
+        assert fd is not None
+        assert expected.is_file()
+        shutil.rmtree(ws_dir)
+        assert expected.is_file()
+        assert activation._try_acquire_member_guard(ws_dir, "repo_a") is None
+    finally:
+        activation._release_member_guard(fd)
+
+
+def test_reaping_member_guards_removes_only_the_named_members_locks(tmp_path: Path) -> None:
+    import camp.provision.activation as activation
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    for name in ("repo_a", "repo_b"):
+        activation._release_member_guard(activation._try_acquire_member_guard(ws_dir, name))
+
+    activation.reap_member_guard_unlocked(ws_dir, ["repo_a"])
+
+    assert sorted(p.name for p in (worktrees / ".locks").iterdir()) == ["feat-x.repo_b.activate.lock"]
+
+
+def test_a_symlinked_member_guard_lock_is_refused_and_its_target_left_untouched(tmp_path: Path) -> None:
+    import pytest
+
+    import camp.provision.activation as activation
+    from camp.group.manifest import LockPathError
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    target = tmp_path / "victim.txt"
+    target.write_text("precious")
+    locks = worktrees / ".locks"
+    locks.mkdir()
+    (locks / "feat-x.repo_a.activate.lock").symlink_to(target)
+
+    with pytest.raises(LockPathError, match="symlink"):
+        activation._try_acquire_member_guard(ws_dir, "repo_a")
+
+    assert target.read_text() == "precious"
+
+
+def test_a_member_guard_lock_folder_that_is_a_file_is_refused(tmp_path: Path) -> None:
+    import pytest
+
+    import camp.provision.activation as activation
+    from camp.group.manifest import LockPathError
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    (worktrees / ".locks").write_text("x")
+
+    with pytest.raises(LockPathError, match="delete"):
+        activation._try_acquire_member_guard(ws_dir, "repo_a")
+
+
+def test_acquiring_an_existing_member_guard_lock_does_not_truncate_it(tmp_path: Path) -> None:
+    import camp.provision.activation as activation
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    lock = worktrees / ".locks" / "feat-x.repo_a.activate.lock"
+    lock.parent.mkdir()
+    lock.write_text("keep")
+
+    fd = activation._try_acquire_member_guard(ws_dir, "repo_a")
+    activation._release_member_guard(fd)
+
+    assert lock.read_text() == "keep"

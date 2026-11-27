@@ -82,6 +82,7 @@ nothing scans.
 from __future__ import annotations
 
 import argparse
+import errno
 import fcntl
 import http.client
 import json
@@ -444,12 +445,63 @@ def _assert_sites_tree_contained(sites_dir: Path, target_dir: Path, root: Path) 
 def _lock_path_for(ws_dir: Path) -> Path:
     """Return the slug-scoped lockfile path for a workspace dir.
 
-    A SIBLING of the workspace dir — ``<worktrees-root>/<slug>.lock`` — never
-    a file inside it, so a `camp remove` teardown's ``rmtree`` of the
+    ``<worktrees-root>/.locks/<slug>.lock`` — camp's one lock folder, never
+    a file inside the workspace dir, so a `camp remove` teardown's ``rmtree`` of the
     workspace dir can never delete the inode this publish is flocking.
     """
     ws_dir = Path(ws_dir)
-    return ws_dir.parent / f"{ws_dir.name}.lock"
+    return ws_dir.parent / ".locks" / f"{ws_dir.name}.lock"
+
+
+def _ensure_locks_dir(locks_dir: Path) -> None:
+    """Mirror of ``camp.group.manifest.ensure_locks_dir``: the lock folder must be
+    a real directory (created 0o700 when missing); anything else is refused."""
+    try:
+        st = os.lstat(locks_dir)
+    except FileNotFoundError:
+        locks_dir.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.mkdir(locks_dir, 0o700)
+        except FileExistsError:
+            pass
+        st = os.lstat(locks_dir)
+    if not stat.S_ISDIR(st.st_mode):
+        if stat.S_ISLNK(st.st_mode):
+            kind = "a symlink"
+        elif stat.S_ISREG(st.st_mode):
+            kind = "a regular file"
+        else:
+            kind = "not a directory"
+        raise PublishError(
+            f"camp lock folder {locks_dir} is {kind}, but camp needs a real directory there — "
+            f"delete {locks_dir} and retry (camp recreates it)"
+        )
+
+
+def _open_lock_file(lock_path: Path):
+    """Mirror of ``camp.group.manifest.open_lock_file``: open the lockfile without
+    following a symlink and without truncating it."""
+    _ensure_locks_dir(lock_path.parent)
+    try:
+        fd = os.open(
+            str(lock_path),
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+        )
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise PublishError(
+                f"camp lock file {lock_path} is a symlink — refusing to open it; "
+                f"delete {lock_path} and retry"
+            ) from exc
+        raise
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise PublishError(
+            f"camp lock file {lock_path} is not a regular file — "
+            f"delete {lock_path} and retry"
+        )
+    return os.fdopen(fd, "r+")
 
 
 @contextmanager
@@ -464,9 +516,8 @@ def _workspace_lock(ws_dir: Path):
     file at ``lock_path`` and retried on the current file if they differ.
     """
     lock_path = _lock_path_for(ws_dir)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
-        lock_fd = open(str(lock_path), "w")
+        lock_fd = _open_lock_file(lock_path)
         try:
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
             try:
@@ -887,40 +938,44 @@ def _publish_to_workspace(
     sites_dir = workspace_path / "sites"
     target_dir = sites_dir / args.slug
 
-    with _workspace_lock(workspace_path):
-        try:
-            _assert_workspace_still_there(workspace_path)
-        except PublishError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
+    try:
+        with _workspace_lock(workspace_path):
+            try:
+                _assert_workspace_still_there(workspace_path)
+            except PublishError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
 
-        try:
-            _assert_sites_tree_contained(sites_dir, target_dir, workspace_path)
-        except PublishError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
+            try:
+                _assert_sites_tree_contained(sites_dir, target_dir, workspace_path)
+            except PublishError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
 
-        sites_dir.mkdir(parents=True, exist_ok=True)
+            sites_dir.mkdir(parents=True, exist_ok=True)
 
-        if target_dir.exists() and not args.overwrite:
-            print(f"error: {target_dir} already exists.", file=sys.stderr)
-            print(_diff_summary(args.source, target_dir), file=sys.stderr)
-            print("Re-run with --overwrite to replace it.", file=sys.stderr)
-            return 1
+            if target_dir.exists() and not args.overwrite:
+                print(f"error: {target_dir} already exists.", file=sys.stderr)
+                print(_diff_summary(args.source, target_dir), file=sys.stderr)
+                print("Re-run with --overwrite to replace it.", file=sys.stderr)
+                return 1
 
-        try:
-            _stage_and_replace(
-                args.source,
-                sites_dir,
-                target_dir,
-                args.slug,
-                pre_swap_check=lambda: _pre_swap_workspace_check(
-                    workspace_path, sites_dir, target_dir
-                ),
-            )
-        except Exception as exc:
-            print(f"error: publish failed: {exc}", file=sys.stderr)
-            return 1
+            try:
+                _stage_and_replace(
+                    args.source,
+                    sites_dir,
+                    target_dir,
+                    args.slug,
+                    pre_swap_check=lambda: _pre_swap_workspace_check(
+                        workspace_path, sites_dir, target_dir
+                    ),
+                )
+            except Exception as exc:
+                print(f"error: publish failed: {exc}", file=sys.stderr)
+                return 1
+    except PublishError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     base = f"http://127.0.0.1:{args.sites_port}"
     plain_link = f"{base}/{key}/{args.slug}/"

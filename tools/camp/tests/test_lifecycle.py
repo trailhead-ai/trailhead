@@ -2469,3 +2469,40 @@ class TestCmdSyncGroupBehaviour:
         assert result["members"]["repo_b"]["action"] == "skip-off-main"
         assert result["members"]["repo_b"]["branch"] == "feature"
         assert _git_stdout(repo_b, "rev-parse", "HEAD") == pre_head_b
+
+
+def test_listing_a_groups_workspaces_ignores_the_populated_locks_folder(tmp_path: Path) -> None:
+    from camp.provision.lifecycle import _list_group_worktrees, host_claimed_session_names
+
+    env = {"CAMP_STATE_DIR": str(tmp_path / "camp")}
+    worktrees = tmp_path / "camp" / "g" / "worktrees"
+    (worktrees / "real").mkdir(parents=True)
+    (worktrees / "real" / "manifest.json").write_text("{}")
+    locks = worktrees / ".locks"
+    locks.mkdir()
+    (locks / "real.lock").write_text("")
+    (locks / "real.repo.activate.lock").write_text("")
+    (locks / "manifest.json").write_text("{}")
+
+    group = {"group": {"name": "g"}}
+    assert [slug for slug, _ in _list_group_worktrees(group, env=env)] == ["real"]
+    assert len(host_claimed_session_names(env=env)) == 1
+
+
+def test_listings_skip_entries_that_are_not_valid_slugs_or_not_real_directories(tmp_path: Path) -> None:
+    from camp.provision.lifecycle import _list_group_worktrees, host_claimed_session_names
+
+    env = {"CAMP_STATE_DIR": str(tmp_path / "camp")}
+    worktrees = tmp_path / "camp" / "g" / "worktrees"
+    (worktrees / "real").mkdir(parents=True)
+    (worktrees / "real" / "manifest.json").write_text("{}")
+    (worktrees / "Bad_Name").mkdir()
+    (worktrees / "Bad_Name" / "manifest.json").write_text("{}")
+    decoy = tmp_path / "decoy"
+    decoy.mkdir()
+    (decoy / "manifest.json").write_text("{}")
+    (worktrees / "linked").symlink_to(decoy)
+
+    group = {"group": {"name": "g"}}
+    assert [slug for slug, _ in _list_group_worktrees(group, env=env)] == ["real"]
+    assert len(host_claimed_session_names(env=env)) == 1

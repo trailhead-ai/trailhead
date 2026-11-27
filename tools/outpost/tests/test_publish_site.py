@@ -1177,7 +1177,8 @@ def test_publish_blocks_while_lock_held_and_proceeds_after_release(tmp_path):
     camp_state = tmp_path / "camp-state"
     ws = _make_workspace(camp_state, group="acme", slug="feat-x")
     source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
-    lock_path = ws.parent / f"{ws.name}.lock"
+    lock_path = ws.parent / ".locks" / f"{ws.name}.lock"
+    lock_path.parent.mkdir(exist_ok=True)
 
     holder_fd = open(lock_path, "w")
     fcntl.flock(holder_fd.fileno(), fcntl.LOCK_EX)
@@ -1211,7 +1212,8 @@ def test_lock_reaped_and_recreated_while_waiting_does_not_orphan(tmp_path):
     camp_state = tmp_path / "camp-state"
     ws = _make_workspace(camp_state, group="acme", slug="feat-x")
     source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
-    lock_path = ws.parent / f"{ws.name}.lock"
+    lock_path = ws.parent / ".locks" / f"{ws.name}.lock"
+    lock_path.parent.mkdir(exist_ok=True)
 
     holder_fd = open(lock_path, "w")
     fcntl.flock(holder_fd.fileno(), fcntl.LOCK_EX)
@@ -1400,6 +1402,13 @@ def test_workspace_publish_still_works_with_a_real_sites_directory(tmp_path):
 _CAMP_PLUGIN_DIR = Path(__file__).resolve().parents[2] / "camp" / "plugins" / "camp"
 if str(_CAMP_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_CAMP_PLUGIN_DIR))
+
+
+def test_lock_path_is_the_slug_lock_in_the_worktrees_locks_folder(tmp_path):
+    mod = _load_module()
+    ws = tmp_path / "acme" / "worktrees" / "feat-x"
+
+    assert mod._lock_path_for(ws) == tmp_path / "acme" / "worktrees" / ".locks" / "feat-x.lock"
 
 
 @pytest.mark.parametrize(
@@ -1926,3 +1935,115 @@ def test_vault_publish_prints_the_same_link_with_or_without_identity(tmp_path):
     assert _url_lines(with_identity.stdout) == [f"http://127.0.0.1:{outpost.port}/acme/docs/"]
     assert with_identity.stdout == without.stdout
     assert outpost.paths == []
+
+
+def test_a_symlinked_lock_file_is_refused_and_its_target_left_untouched(tmp_path):
+    mod = _load_module()
+    ws = _make_workspace(tmp_path / "camp-state")
+    target = tmp_path / "victim.txt"
+    target.write_text("precious")
+    lock_path = mod._lock_path_for(ws)
+    lock_path.parent.mkdir()
+    lock_path.symlink_to(target)
+
+    with pytest.raises(mod.PublishError, match="symlink"):
+        with mod._workspace_lock(ws):
+            pytest.fail("lock was acquired through a symlink")
+
+    assert target.read_text() == "precious"
+
+
+def test_acquiring_an_existing_lock_file_does_not_truncate_it(tmp_path):
+    mod = _load_module()
+    ws = _make_workspace(tmp_path / "camp-state")
+    lock_path = mod._lock_path_for(ws)
+    lock_path.parent.mkdir()
+    lock_path.write_text("keep")
+
+    with mod._workspace_lock(ws):
+        pass
+
+    assert lock_path.read_text() == "keep"
+
+
+@pytest.mark.parametrize("shape", ["file", "symlink-to-dir", "dangling-symlink"])
+def test_a_lock_folder_that_is_not_a_real_directory_is_refused(tmp_path, shape):
+    mod = _load_module()
+    ws = _make_workspace(tmp_path / "camp-state")
+    locks = ws.parent / ".locks"
+    if shape == "file":
+        locks.write_text("x")
+    elif shape == "symlink-to-dir":
+        (tmp_path / "elsewhere").mkdir()
+        locks.symlink_to(tmp_path / "elsewhere")
+    else:
+        locks.symlink_to(tmp_path / "nowhere")
+
+    with pytest.raises(mod.PublishError, match="delete") as excinfo:
+        with mod._workspace_lock(ws):
+            pytest.fail("lock was acquired in a lock folder that is not a directory")
+
+    assert str(locks) in str(excinfo.value)
+    assert not (tmp_path / "elsewhere" / "feat-x.lock").exists()
+
+
+def test_a_missing_lock_folder_is_created_private(tmp_path):
+    mod = _load_module()
+    ws = _make_workspace(tmp_path / "camp-state")
+
+    with mod._workspace_lock(ws):
+        pass
+
+    assert (ws.parent / ".locks").stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize("shape", ["file", "symlinked-lock-file"])
+def test_main_reports_a_bad_lock_path_as_one_error_line_and_returns_1(tmp_path, capsys, shape):
+    camp_state = tmp_path / "camp-state"
+    ws = _make_workspace(camp_state, group="acme", slug="feat-x")
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    victim = tmp_path / "victim.txt"
+    victim.write_text("precious")
+    mod = _load_module()
+    locks = ws.parent / ".locks"
+    if shape == "file":
+        locks.write_text("in the way")
+    else:
+        locks.mkdir()
+        (locks / "feat-x.lock").symlink_to(victim)
+
+    rc = mod.main(
+        [str(source), "mysite", "--workspace-path", str(ws)],
+        env=_env(tmp_path, camp_state_dir=camp_state),
+    )
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert err.startswith("error: "), err
+    assert len(err.strip().splitlines()) == 1, err
+    assert victim.read_text() == "precious"
+    assert not (ws / "sites").exists()
+
+
+@pytest.mark.parametrize(
+    "shape, phrase",
+    [("file", "is a regular file"), ("symlink", "is a symlink"), ("fifo", "is not a directory")],
+)
+def test_the_lock_folder_refusal_says_what_is_actually_there(tmp_path, shape, phrase):
+    import os
+
+    mod = _load_module()
+    ws = _make_workspace(tmp_path / "camp-state")
+    locks = ws.parent / ".locks"
+    if shape == "file":
+        locks.write_text("x")
+    elif shape == "symlink":
+        locks.symlink_to(tmp_path / "nowhere")
+    else:
+        os.mkfifo(locks)
+
+    with pytest.raises(mod.PublishError) as excinfo:
+        with mod._workspace_lock(ws):
+            pytest.fail("lock was acquired in a lock folder that is not a directory")
+
+    assert phrase in str(excinfo.value)
