@@ -147,14 +147,14 @@ def reached() -> None:
     _deadline = None
 
 
-def _timeout_for(timeout: float | None) -> float:
+def _timeout_for(timeout: float | None, env: dict[str, str] | None = None) -> float:
     if timeout is not None:
         return timeout
     if _deadline is None:
         return CONNECT_TIMEOUT_SECONDS
     remaining = _deadline - time.monotonic()
     if remaining <= 0:
-        raise OutpostUnreachable(socket_path())
+        raise OutpostUnreachable(socket_path(env))
     return remaining
 
 
@@ -195,7 +195,7 @@ def request(
         send_headers["Content-Length"] = str(body_file[1])
         send_headers["Content-Type"] = body_file[2]
     send_headers["Connection"] = "close"
-    conn = _connection(_timeout_for(timeout), env)
+    conn = _connection(_timeout_for(timeout, env), env)
     try:
         conn.request(method, path, body=data, headers=send_headers)
         resp = conn.getresponse()

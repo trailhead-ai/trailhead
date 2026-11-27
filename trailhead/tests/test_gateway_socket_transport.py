@@ -81,3 +81,12 @@ def test_a_socket_the_operating_system_denies_us_is_not_reachable_naming_the_soc
             outpost_http.request("GET", "/gateway/runs")
     assert raised.value.path == socket_path
     assert not isinstance(raised.value, outpost_http.OutpostUnreachable)
+
+
+def test_an_exhausted_reach_budget_names_the_socket_of_the_env_the_caller_passed(state, tmp_path, monkeypatch):
+    other = tmp_path / "other-state"
+    monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", -1.0)
+    with outpost_http.reach_budget():
+        with pytest.raises(outpost_http.OutpostUnreachable) as raised:
+            outpost_http.request("GET", "/health", env={"OUTPOST_STATE_DIR": str(other)})
+    assert raised.value.path == other / "gateway" / "gateway.sock"
