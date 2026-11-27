@@ -1049,8 +1049,16 @@ def _planted_patterns(env) -> list[str]:
     return [
         entry
         for root in (home, lore)
-        for entry in (f"{root}/**/.claude", *_admin(f"{root}/**/.git"))
+        for entry in (f"{root}/**/.claude", f"{root}/**/.mcp.json", *_admin(f"{root}/**/.git"))
     ]
+
+
+def test_a_planted_mcp_json_is_denied_under_every_writable_root_but_the_cache(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    deny = _deny_of(env)
+    assert {f"{home}/**/.mcp.json", f"{lore}/**/.mcp.json"} <= set(deny)
+    assert not [d for d in deny if d.startswith(cache)]
 
 
 def test_no_vaults_denies_only_the_glob_for_vaults_created_later(tmp_path):

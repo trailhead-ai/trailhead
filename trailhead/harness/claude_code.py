@@ -1566,7 +1566,8 @@ def _planted_folder_patterns(writable: list[Path]) -> list[str]:
 
     Under each root given (a profile's workspace, vault and hub-home roots, never its cache root, where
     tools legitimately clone repositories), at any depth: the ``.claude`` folder (harness settings, hooks and
-    skills the operator's tools later load) and the ``config``, ``hooks`` and ``info`` of a
+    skills the operator's tools later load), the ``.mcp.json`` file (project MCP servers the operator's settings may
+    pre-enable by name) and the ``config``, ``hooks`` and ``info`` of a
     ``.git`` folder (a planted filter or hook later runs unsandboxed). The rest of ``.git``
     stays writable so a vault can still be committed to. Folders and vaults that exist when the
     profile resolves are also named concretely (see :func:`_git_admin_denials`); a sandbox that
@@ -1576,7 +1577,11 @@ def _planted_folder_patterns(writable: list[Path]) -> list[str]:
     """
     found: list[str] = []
     for root in writable:
-        for entry in (f"{root}/**/.claude", *(f"{root}/**/.git/{n}" for n in _GIT_ADMIN_NAMES)):
+        for entry in (
+            f"{root}/**/.claude",
+            f"{root}/**/.mcp.json",
+            *(f"{root}/**/.git/{n}" for n in _GIT_ADMIN_NAMES),
+        ):
             if entry not in found:
                 found.append(entry)
     return found
