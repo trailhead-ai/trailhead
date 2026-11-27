@@ -13,11 +13,10 @@ import os
 import pytest
 
 from _docket_cli import PLUGIN_ROOT  # noqa: F401  (puts the plugin on sys.path)
-from _docket_env import DEFAULT, ref
+from _docket_env import DEFAULT, docket_env, hermetic_git_env, ref  # noqa: F401  (fixtures)
 
 from docket.store import Store
 
-pytest_plugins = ["_docket_env"]
 
 
 BASE = ("task/a", "task/b", "task/c")

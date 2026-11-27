@@ -1,6 +1,6 @@
-"""docket's shared test fixtures (env, hermetic_git_env), registered by each test module through
-pytest_plugins: a second bare conftest.py would collide with the other tools' under pytest's prepend
-import mode."""
+"""docket's shared test fixtures. A test module imports docket_env (the `env` fixture) and
+hermetic_git_env, so they stay local to docket's tests: a second bare conftest.py would collide with
+the other tools' under pytest's prepend import mode."""
 from __future__ import annotations
 
 import json
@@ -144,8 +144,8 @@ class Env:
         return path.read_bytes() if path.exists() else None
 
 
-@pytest.fixture
-def env(tmp_path, hermetic_git_env, monkeypatch, capsys):  # noqa: F811  (hermetic_git_env is the imported fixture)
+@pytest.fixture(name="env")
+def docket_env(tmp_path, hermetic_git_env, monkeypatch, capsys):  # noqa: F811  (hermetic_git_env is the imported fixture)
     vault_dir = tmp_path / "vault"
     subprocess.run(["git", "init", "-q", str(vault_dir)], check=True, env=hermetic_git_env)
     fake = FakeLore(DEFAULT, vault_dir)

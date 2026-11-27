@@ -18,8 +18,6 @@ from trailhead.tests._git_support import make_hermetic_git_env
 
 from docket import changes
 
-# The env and hermetic_git_env fixtures live in _docket_env; registering it shares them.
-pytest_plugins = ["_docket_env"]
 
 pytestmark = pytest.mark.seam_real
 
