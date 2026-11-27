@@ -203,6 +203,10 @@ def reap_member_guard_unlocked(ws_dir: Path, member_names: list[str]) -> None:
     unsafe unlink.
     """
     for name in member_names:
+        lock_path = member_guard_lock_path(ws_dir, name)
+        if lock_path.is_symlink():
+            lock_path.unlink()
+            continue
         fd = _try_acquire_member_guard(ws_dir, name)
         if fd is None:
             continue

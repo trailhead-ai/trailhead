@@ -466,9 +466,14 @@ def _ensure_locks_dir(locks_dir: Path) -> None:
             pass
         st = os.lstat(locks_dir)
     if not stat.S_ISDIR(st.st_mode):
-        kind = "a symlink" if stat.S_ISLNK(st.st_mode) else "not a directory"
+        if stat.S_ISLNK(st.st_mode):
+            kind = "a symlink"
+        elif stat.S_ISREG(st.st_mode):
+            kind = "a regular file"
+        else:
+            kind = "not a directory"
         raise PublishError(
-            f"camp lock folder {locks_dir} is {kind}, not a real directory — "
+            f"camp lock folder {locks_dir} is {kind}, but camp needs a real directory there — "
             f"delete {locks_dir} and retry (camp recreates it)"
         )
 
@@ -933,40 +938,44 @@ def _publish_to_workspace(
     sites_dir = workspace_path / "sites"
     target_dir = sites_dir / args.slug
 
-    with _workspace_lock(workspace_path):
-        try:
-            _assert_workspace_still_there(workspace_path)
-        except PublishError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
+    try:
+        with _workspace_lock(workspace_path):
+            try:
+                _assert_workspace_still_there(workspace_path)
+            except PublishError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
 
-        try:
-            _assert_sites_tree_contained(sites_dir, target_dir, workspace_path)
-        except PublishError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
+            try:
+                _assert_sites_tree_contained(sites_dir, target_dir, workspace_path)
+            except PublishError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
 
-        sites_dir.mkdir(parents=True, exist_ok=True)
+            sites_dir.mkdir(parents=True, exist_ok=True)
 
-        if target_dir.exists() and not args.overwrite:
-            print(f"error: {target_dir} already exists.", file=sys.stderr)
-            print(_diff_summary(args.source, target_dir), file=sys.stderr)
-            print("Re-run with --overwrite to replace it.", file=sys.stderr)
-            return 1
+            if target_dir.exists() and not args.overwrite:
+                print(f"error: {target_dir} already exists.", file=sys.stderr)
+                print(_diff_summary(args.source, target_dir), file=sys.stderr)
+                print("Re-run with --overwrite to replace it.", file=sys.stderr)
+                return 1
 
-        try:
-            _stage_and_replace(
-                args.source,
-                sites_dir,
-                target_dir,
-                args.slug,
-                pre_swap_check=lambda: _pre_swap_workspace_check(
-                    workspace_path, sites_dir, target_dir
-                ),
-            )
-        except Exception as exc:
-            print(f"error: publish failed: {exc}", file=sys.stderr)
-            return 1
+            try:
+                _stage_and_replace(
+                    args.source,
+                    sites_dir,
+                    target_dir,
+                    args.slug,
+                    pre_swap_check=lambda: _pre_swap_workspace_check(
+                        workspace_path, sites_dir, target_dir
+                    ),
+                )
+            except Exception as exc:
+                print(f"error: publish failed: {exc}", file=sys.stderr)
+                return 1
+    except PublishError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     base = f"http://127.0.0.1:{args.sites_port}"
     plain_link = f"{base}/{key}/{args.slug}/"

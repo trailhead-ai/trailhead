@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .manifest import LockTimeout, reconcile_lock
+from .manifest import LockPathError, LockTimeout, reconcile_lock
 
 WINDOW_RECORD_FILENAME = "windows.json"
 
@@ -375,5 +375,5 @@ def restamp_window_entries(
             return Restamped(entries=tuple(restamped))
     except LockTimeout as e:
         return NotRestamped(reason=f"camp: could not restamp window record at {path}: {e}")
-    except OSError as e:
+    except (LockPathError, OSError) as e:
         return NotRestamped(reason=f"camp: could not restamp window record at {path}: {e}")

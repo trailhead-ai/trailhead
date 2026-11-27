@@ -273,3 +273,29 @@ def test_a_missing_lock_folder_is_created_private(tmp_path: Path) -> None:
         pass
 
     assert (worktrees / ".locks").stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize(
+    "shape, phrase",
+    [("file", "is a regular file"), ("symlink", "is a symlink"), ("fifo", "is not a directory")],
+)
+def test_the_lock_folder_refusal_says_what_is_actually_there(
+    tmp_path: Path, shape: str, phrase: str
+) -> None:
+    from camp.group.manifest import LockPathError, reconcile_lock
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    locks = tmp_path / ".locks"
+    if shape == "file":
+        locks.write_text("x")
+    elif shape == "symlink":
+        locks.symlink_to(tmp_path / "nowhere")
+    else:
+        os.mkfifo(locks)
+
+    with pytest.raises(LockPathError) as excinfo:
+        with reconcile_lock(ws_dir):
+            pytest.fail("lock was acquired in a lock folder that is not a directory")
+
+    assert phrase in str(excinfo.value)

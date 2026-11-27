@@ -1995,3 +1995,55 @@ def test_a_missing_lock_folder_is_created_private(tmp_path):
         pass
 
     assert (ws.parent / ".locks").stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize("shape", ["file", "symlinked-lock-file"])
+def test_main_reports_a_bad_lock_path_as_one_error_line_and_returns_1(tmp_path, capsys, shape):
+    camp_state = tmp_path / "camp-state"
+    ws = _make_workspace(camp_state, group="acme", slug="feat-x")
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    victim = tmp_path / "victim.txt"
+    victim.write_text("precious")
+    mod = _load_module()
+    locks = ws.parent / ".locks"
+    if shape == "file":
+        locks.write_text("in the way")
+    else:
+        locks.mkdir()
+        (locks / "feat-x.lock").symlink_to(victim)
+
+    rc = mod.main(
+        [str(source), "mysite", "--workspace-path", str(ws)],
+        env=_env(tmp_path, camp_state_dir=camp_state),
+    )
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert err.startswith("error: "), err
+    assert len(err.strip().splitlines()) == 1, err
+    assert victim.read_text() == "precious"
+    assert not (ws / "sites").exists()
+
+
+@pytest.mark.parametrize(
+    "shape, phrase",
+    [("file", "is a regular file"), ("symlink", "is a symlink"), ("fifo", "is not a directory")],
+)
+def test_the_lock_folder_refusal_says_what_is_actually_there(tmp_path, shape, phrase):
+    import os
+
+    mod = _load_module()
+    ws = _make_workspace(tmp_path / "camp-state")
+    locks = ws.parent / ".locks"
+    if shape == "file":
+        locks.write_text("x")
+    elif shape == "symlink":
+        locks.symlink_to(tmp_path / "nowhere")
+    else:
+        os.mkfifo(locks)
+
+    with pytest.raises(mod.PublishError) as excinfo:
+        with mod._workspace_lock(ws):
+            pytest.fail("lock was acquired in a lock folder that is not a directory")
+
+    assert phrase in str(excinfo.value)

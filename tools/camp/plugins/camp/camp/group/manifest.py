@@ -294,9 +294,14 @@ def ensure_locks_dir(locks_dir: Path) -> None:
             pass
         st = os.lstat(locks_dir)
     if not stat.S_ISDIR(st.st_mode):
-        kind = "a symlink" if stat.S_ISLNK(st.st_mode) else "not a directory"
+        if stat.S_ISLNK(st.st_mode):
+            kind = "a symlink"
+        elif stat.S_ISREG(st.st_mode):
+            kind = "a regular file"
+        else:
+            kind = "not a directory"
         raise LockPathError(
-            f"camp: lock folder {locks_dir} is {kind}, not a real directory — "
+            f"camp: lock folder {locks_dir} is {kind}, but camp needs a real directory there — "
             f"delete {locks_dir} and retry (camp recreates it)"
         )
 

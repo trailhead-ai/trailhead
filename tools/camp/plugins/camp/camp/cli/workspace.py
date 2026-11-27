@@ -375,6 +375,7 @@ def _cmd_activate_group_cli(
         MemberNotReadyError,
     )
     from ..group.config import GroupConfigError
+    from ..group.manifest import LockPathError
     from ..launch.profile import resolve_harness_profile
 
     parser = group_verb_parser("activate")
@@ -414,6 +415,9 @@ def _cmd_activate_group_cli(
         print(str(e), file=sys.stderr)
         sys.exit(1)
     except GroupConfigError as e:
+        print(f"camp activate: {e}", file=sys.stderr)
+        sys.exit(1)
+    except LockPathError as e:
         print(f"camp activate: {e}", file=sys.stderr)
         sys.exit(1)
     except ValueError as e:

@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ..group.manifest import LockTimeout, reconcile_lock
+from ..group.manifest import LockPathError, LockTimeout, reconcile_lock
 from ..group.window_record import (
     WindowEntry,
     read_window_record,
@@ -217,6 +217,8 @@ def reconcile_workspace_record(
         return NotReconciled(
             reason=f"camp: window record at {path} is locked by another camp process; not reconciled"
         )
+    except LockPathError as e:
+        return NotReconciled(reason=f"{e}; window record at {path} not reconciled")
 
 
 def render_reconcile_lines(outcome: ReconcileOutcome) -> list[str]:
