@@ -31,6 +31,8 @@ import pytest
 import trailhead
 from trailhead import cli, outpost_lifecycle
 from trailhead import outpost_supervisor as osup
+from trailhead.gateway import outpost_http
+from trailhead.tests._gateway_support import gateway_socket_path, short_state_dir, unix_http_server
 from trailhead.outpost_lifecycle import (
     EXIT_FAILED,
     EXIT_RESTARTING,
@@ -839,6 +841,7 @@ class _TestOutpost:
         self.minted = 0
         self.ui_code_status: int | None = None
         self.ui_code_body: bytes = b""
+        self.tcp_credential_posts: list[str | None] = []
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -860,14 +863,8 @@ class _TestOutpost:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(n).decode()
                 if self.path == "/operator/ui-code":
-                    if outer.ui_code_status is not None:
-                        return self._send(outer.ui_code_status, outer.ui_code_body)
-                    if self.headers.get("Authorization") != f"Bearer {outer.CREDENTIAL}":
-                        return self._send(401)
-                    outer.minted += 1
-                    code = f"code-{outer.minted}-{os.urandom(8).hex()}"
-                    outer.codes.add(code)
-                    return self._send(200, json.dumps({"code": code}).encode())
+                    outer.tcp_credential_posts.append(self.headers.get("Authorization"))
+                    return self._send(404)
                 if self.path == "/auth/open":
                     code = urllib.parse.parse_qs(body).get("code", [""])[0]
                     if code in outer.codes:
@@ -882,6 +879,21 @@ class _TestOutpost:
         self.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def ui_code(self, headers: dict) -> outpost_http.Reply:
+        """What Outpost answers on its gateway socket to POST /operator/ui-code."""
+        if self.ui_code_status is not None:
+            try:
+                body = json.loads(self.ui_code_body)
+            except ValueError:
+                body = None
+            return outpost_http.Reply(self.ui_code_status, body if isinstance(body, dict) else {})
+        if headers.get("Authorization") != f"Bearer {self.CREDENTIAL}":
+            return outpost_http.Reply(401, {})
+        self.minted += 1
+        code = f"code-{self.minted}-{os.urandom(8).hex()}"
+        self.codes.add(code)
+        return outpost_http.Reply(200, {"code": code})
 
     def swap(self, code: str) -> str | None:
         req = urllib.request.Request(
@@ -901,7 +913,8 @@ class _TestOutpost:
 
 
 @pytest.fixture()
-def test_outpost(outpost):
+def tcp_outpost(outpost):
+    """Outpost's TCP side only (health, the browser sign-in page), with the operator credential on disk and no socket."""
     t = _TestOutpost()
     cred = outpost.state_dir / "operator" / "credential"
     cred.parent.mkdir(parents=True)
@@ -910,6 +923,18 @@ def test_outpost(outpost):
     t.credential_path = cred
     yield t
     t.close()
+
+
+@pytest.fixture()
+def test_outpost(tcp_outpost, monkeypatch):
+    """``tcp_outpost`` plus Outpost's answers on the gateway socket, served in-process."""
+
+    def fake_request(method, path, *, headers=None, **kw):
+        assert (method, path) == ("POST", "/operator/ui-code")
+        return tcp_outpost.ui_code(headers or {})
+
+    monkeypatch.setattr(outpost_http, "request", fake_request)
+    return tcp_outpost
 
 
 def _form_code(html: str) -> str:
@@ -938,6 +963,91 @@ def test_open_hands_the_browser_a_file_never_the_code(outpost, test_outpost):
     assert f"http://127.0.0.1:{test_outpost.port}/auth/open" in snap["text"]
     assert "outpost_session=" in (test_outpost.swap(code) or "")
     assert test_outpost.swap(code) is None
+
+
+def test_open_with_no_socket_sends_the_credential_to_no_tcp_listener(outpost, tcp_outpost):
+    opener = _RecordingOpener()
+
+    with pytest.raises(OutpostLifecycleError) as exc:
+        outpost_lifecycle.open_ui(env=outpost.env, port=tcp_outpost.port, opener=opener, settle=0)
+
+    socket_path = gateway_socket_path(outpost.state_dir)
+    assert f"Outpost is unreachable at {socket_path}; is it running?" in str(exc.value)
+    assert tcp_outpost.tcp_credential_posts == []
+    assert opener.args == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root passes a folder's mode check, so no folder can deny it")
+def test_open_with_a_socket_the_operating_system_denies_us_sends_the_credential_to_no_tcp_listener(
+    outpost, tcp_outpost
+):
+    folder = gateway_socket_path(outpost.state_dir).parent
+    folder.mkdir(mode=0o700, parents=True)
+    folder.chmod(0o000)
+    try:
+        with pytest.raises(OutpostLifecycleError) as exc:
+            outpost_lifecycle.open_ui(
+                env=outpost.env, port=tcp_outpost.port, opener=_RecordingOpener(), settle=0
+            )
+    finally:
+        folder.chmod(0o700)
+
+    socket_path = gateway_socket_path(outpost.state_dir)
+    assert f"Outpost's socket at {socket_path} is not reachable from here (permission denied)" in str(exc.value)
+    assert tcp_outpost.tcp_credential_posts == []
+
+
+def _socket_outpost_handler(seen: list, credential: str):
+    import http.server as hs
+
+    class Handler(hs.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            seen.append((self.path, self.headers.get("Authorization")))
+            ok = self.headers.get("Authorization") == f"Bearer {credential}"
+            body = json.dumps({"code": "socket-minted-code"} if ok else {}).encode()
+            self.send_response(200 if ok else 401)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    return Handler
+
+
+def test_open_mints_its_code_over_outposts_socket_and_sends_nothing_to_tcp(outpost, tcp_outpost):
+    # Host-only: binding a unix socket is refused inside the sandbox.
+    state = short_state_dir()
+    env = {**outpost.env, "OUTPOST_STATE_DIR": str(state)}
+    (state / "operator").mkdir(parents=True)
+    (state / "operator" / "credential").write_text(tcp_outpost.CREDENTIAL)
+    seen: list = []
+    opener = _RecordingOpener()
+
+    with unix_http_server(state, _socket_outpost_handler(seen, tcp_outpost.CREDENTIAL)):
+        rc = outpost_lifecycle.open_ui(env=env, port=tcp_outpost.port, opener=opener, settle=0)
+
+    assert rc == 0
+    assert seen == [("/operator/ui-code", f"Bearer {tcp_outpost.CREDENTIAL}")]
+    assert _form_code(opener.snapshots[0]["text"]) == "socket-minted-code"
+    assert tcp_outpost.tcp_credential_posts == []
+
+
+def test_open_reports_a_credential_outpost_refuses_over_its_socket(outpost, tcp_outpost):
+    # Host-only: binding a unix socket is refused inside the sandbox.
+    state = short_state_dir()
+    env = {**outpost.env, "OUTPOST_STATE_DIR": str(state)}
+    (state / "operator").mkdir(parents=True)
+    (state / "operator" / "credential").write_text("a-credential-from-an-older-boot")
+
+    with unix_http_server(state, _socket_outpost_handler([], tcp_outpost.CREDENTIAL)):
+        with pytest.raises(OutpostLifecycleError) as exc:
+            outpost_lifecycle.open_ui(
+                env=env, port=tcp_outpost.port, opener=_RecordingOpener(), settle=0
+            )
+
+    assert "trailhead outpost restart" in str(exc.value)
 
 
 def test_open_deletes_the_file_after_use(outpost, test_outpost):

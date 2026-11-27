@@ -171,6 +171,19 @@ class _UnixHTTPServer(ThreadingHTTPServer):
         self.server_name, self.server_port = "outpost", 0
 
 
+@contextmanager
+def unix_http_server(state: Path, handler: type[BaseHTTPRequestHandler]) -> Iterator[None]:
+    """Serve *handler* on the gateway socket of *state*, as Outpost does."""
+    _socket_folder(state)
+    server = _UnixHTTPServer(str(gateway_socket_path(state)), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 @dataclass
 class StubOutpost:
     """Loopback Outpost: issues TOKEN for the right client, serves ``runs`` for TOKEN.

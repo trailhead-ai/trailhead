@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-import socket
 import urllib.error
 import urllib.request
 
+from trailhead.gateway import outpost_http
 from trailhead.launch_profile import operator_token_store, validate_account
 from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT
 
@@ -71,14 +71,6 @@ def read_operator_credential(env: dict[str, str]) -> str:
     return value
 
 
-def _body(exc: urllib.error.HTTPError) -> dict:
-    try:
-        data = json.loads(exc.read())
-    except (ValueError, OSError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _diagnostic(account: str) -> str:
     return (
         f"run `trailhead session-start --role hub --account {account} --json "
@@ -105,45 +97,50 @@ def start_hub(
     account: str,
     credential: str,
     *,
-    port: int = DAEMON_PORT,
+    env: dict[str, str] | None = None,
     timeout: float = START_TIMEOUT_SECONDS,
 ) -> None:
-    """Ask Outpost to start the hub for ``account``; returns on 200, raises OutpostRefusal otherwise."""
+    """Ask Outpost, over its gateway socket, to start the hub for ``account``; returns on 200, raises OutpostRefusal otherwise."""
     validate_account(account)
-    request = urllib.request.Request(
-        f"http://{DAEMON_HOST}:{port}/operator/hubs/{account}/start",
-        method="POST",
-        data=b"",
-        headers={"Authorization": f"Bearer {credential}"},
-    )
     try:
-        with _opener().open(request, timeout=timeout):
-            return
-    except urllib.error.HTTPError as exc:
-        body = _body(exc)
-        if exc.code == 401:
-            raise OutpostRefusal(
-                "Outpost rejected the operator credential; restart it with "
-                "`trailhead outpost restart`"
-            )
-        if body.get("error") == "hub_exited_at_launch":
-            raise OutpostRefusal(f"hub exited at launch:\n{body.get('output', '')}")
-        if exc.code == 504:
-            raise OutpostRefusal("Outpost timed out starting the hub")
-        message = body.get("message")
-        if message and body.get("error") in _DIAGNOSABLE:
-            message = f"{message}; {_diagnostic(account)}"
-        detail = (
-            message
-            or _canned_detail(body.get("error"), account)
-            or body.get("error")
-            or f"HTTP {exc.code}"
+        reply = outpost_http.request(
+            "POST",
+            f"/operator/hubs/{account}/start",
+            headers={"Authorization": f"Bearer {credential}"},
+            json_body={},
+            timeout=timeout,
+            env=env,
         )
-        step = body.get("step")
-        raise OutpostRefusal(f"Outpost could not start the hub: {detail}" + (f" (step: {step})" if step else ""))
-    except (socket.timeout, TimeoutError):
-        raise OutpostRefusal(f"timed out after {timeout:g}s waiting for Outpost to start the hub")
-    except urllib.error.URLError as exc:
-        if isinstance(exc.reason, (socket.timeout, TimeoutError)):
-            raise OutpostRefusal(f"timed out after {timeout:g}s waiting for Outpost to start the hub")
-        raise OutpostRefusal(f"could not reach Outpost: {exc.reason}")
+    except outpost_http.ReplyTimedOut:
+        raise OutpostRefusal(f"timed out after {timeout:g}s waiting for Outpost to start the hub") from None
+    except outpost_http.OutpostUnreachable as exc:
+        raise OutpostRefusal(f"Outpost is unreachable at {exc.path}; is it running?") from None
+    except outpost_http.SocketNotReachable as exc:
+        raise OutpostRefusal(
+            f"Outpost's socket at {exc.path} is not reachable from here (permission denied)"
+        ) from None
+    if 200 <= reply.status < 300:
+        return
+    if 300 <= reply.status < 400:
+        raise OutpostRefusal(f"Outpost answered with a redirect (HTTP {reply.status}); refusing to follow it")
+    body = reply.body
+    if reply.status == 401:
+        raise OutpostRefusal(
+            "Outpost rejected the operator credential; restart it with "
+            "`trailhead outpost restart`"
+        )
+    if body.get("error") == "hub_exited_at_launch":
+        raise OutpostRefusal(f"hub exited at launch:\n{body.get('output', '')}")
+    if reply.status == 504:
+        raise OutpostRefusal("Outpost timed out starting the hub")
+    message = body.get("message")
+    if message and body.get("error") in _DIAGNOSABLE:
+        message = f"{message}; {_diagnostic(account)}"
+    detail = (
+        message
+        or _canned_detail(body.get("error"), account)
+        or body.get("error")
+        or f"HTTP {reply.status}"
+    )
+    step = body.get("step")
+    raise OutpostRefusal(f"Outpost could not start the hub: {detail}" + (f" (step: {step})" if step else ""))

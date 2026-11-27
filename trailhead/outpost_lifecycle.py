@@ -1022,15 +1022,6 @@ class _NoCodeRoute(Exception):
     """The daemon has no route that mints a one-time sign-in code."""
 
 
-def _wants_cookie(refusal: urllib.error.HTTPError) -> bool:
-    """Whether a 403 is the answer of an Outpost older than the sign-in code, which mounts no such route and so
-    refuses the state-changing POST for lack of the UI cookie."""
-    try:
-        return json.loads(refusal.read(4096)).get("error") == "human_action_requires_cookie"
-    except (OSError, ValueError, AttributeError):
-        return False
-
-
 def _mint_open_code(env: dict[str, str] | None, port: int, timeout: float) -> str:
     """Read the operator credential and ask the daemon for a one-time code; :class:`_NoCodeRoute` when it has no
     such route (a daemon older than the sign-in code, which signs the browser in on its own; it answers 404, or
@@ -1043,26 +1034,36 @@ def _mint_open_code(env: dict[str, str] | None, port: int, timeout: float) -> st
             f"cannot read the operator credential ({exc.strerror or exc}); "
             "run 'trailhead outpost open' from your own terminal, not from a sandbox."
         ) from exc
-    request = urllib.request.Request(
-        f"http://{DAEMON_HOST}:{port}/operator/ui-code",
-        data=b"",
-        method="POST",
-        headers={"Authorization": f"Bearer {credential}"},
-    )
+    # outpost_http imports this module, so it is imported here.
+    from trailhead.gateway import outpost_http
+
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as resp:
-            return json.loads(resp.read())["code"]
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404 or (exc.code == 403 and _wants_cookie(exc)):
-            raise _NoCodeRoute from exc
-        if exc.code == 401:
-            raise OutpostLifecycleError(
-                "outpost refused the operator credential (it is from an older boot); "
-                "run 'trailhead outpost restart' and try again."
-            ) from exc
-        raise OutpostLifecycleError(f"outpost refused the open request (HTTP {exc.code}).") from exc
-    except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
-        raise OutpostLifecycleError(f"could not get a one-time code from outpost: {exc}") from exc
+        reply = outpost_http.request(
+            "POST",
+            "/operator/ui-code",
+            headers={"Authorization": f"Bearer {credential}"},
+            json_body={},
+            timeout=timeout,
+            env=env,
+        )
+    except outpost_http.OutpostUnreachable as exc:
+        raise OutpostLifecycleError(f"Outpost is unreachable at {exc.path}; is it running?") from None
+    except outpost_http.SocketNotReachable as exc:
+        raise OutpostLifecycleError(
+            f"Outpost's socket at {exc.path} is not reachable from here (permission denied)"
+        ) from None
+    if reply.status == 200 and isinstance(reply.body.get("code"), str):
+        return reply.body["code"]
+    if reply.status == 404 or (reply.status == 403 and reply.body.get("error") == "human_action_requires_cookie"):
+        raise _NoCodeRoute
+    if reply.status == 401:
+        raise OutpostLifecycleError(
+            "outpost refused the operator credential (it is from an older boot); "
+            "run 'trailhead outpost restart' and try again."
+        )
+    if reply.status == 200:
+        raise OutpostLifecycleError("could not get a one-time code from outpost: the reply carried no code")
+    raise OutpostLifecycleError(f"outpost refused the open request (HTTP {reply.status}).")
 
 
 def _sweep_open_files(folder: Path) -> None:

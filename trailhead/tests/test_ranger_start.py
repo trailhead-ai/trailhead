@@ -17,10 +17,12 @@ from pathlib import Path
 
 import pytest
 
+from trailhead.gateway import outpost_http
 from trailhead.paths import state_dir
 from trailhead.ranger.cli import main
 from trailhead.ranger.config import HubConfig, write_hub_config
 from trailhead.ranger.outpost_client import tmux_attach_argv
+from trailhead.tests._gateway_support import gateway_socket_path, short_state_dir, unix_http_server
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ranger-contract.json"
 CREDENTIAL = "s3cret-operator-credential"
@@ -75,6 +77,7 @@ class _Stub:
         self.body = body if body is not None else {"started": True, "socket": "outpost-hubs", "target": "hub-x"}
         self.delay = delay
         self.posts: list[tuple[str, str | None]] = []
+        self.tcp_posts: list[tuple[str, str | None]] = []
         stub = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -98,7 +101,7 @@ class _Stub:
                 self.wfile.write(payload)
 
             def do_POST(self):
-                stub.posts.append((self.path, self.headers.get("Authorization")))
+                stub.tcp_posts.append((self.path, self.headers.get("Authorization")))
                 time.sleep(stub.delay)
                 payload = json.dumps(stub.body).encode()
                 try:
@@ -121,13 +124,27 @@ class _Stub:
         self.server.server_close()
 
 
+def _serve_on_socket(monkeypatch, s):
+    """Answer what the client sends over Outpost's socket as the stub is set to, and record it in ``s.posts``."""
+
+    def fake_request(method, path, *, headers=None, timeout=None, **kw):
+        s.posts.append((path, (headers or {}).get("Authorization")))
+        if s.delay and timeout is not None and s.delay > timeout:
+            raise outpost_http.ReplyTimedOut(Path("outpost.sock"))
+        return outpost_http.Reply(s.status, s.body)
+
+    monkeypatch.setattr(outpost_http, "request", fake_request)
+
+
 @pytest.fixture
-def stub():
+def stub(monkeypatch):
     made = []
 
-    def make(**kw):
+    def make(*, socket=True, **kw):
         s = _Stub(**kw)
         made.append(s)
+        if socket:
+            _serve_on_socket(monkeypatch, s)
         return s
 
     yield make
@@ -212,6 +229,66 @@ def test_outpost_down_refuses_names_start_command_no_credential_read(tmp_path, c
     assert rc != 0 and ex.calls == []
     assert "trailhead outpost start" in err
     assert "restart" not in err
+
+
+def test_no_socket_sends_the_credential_to_no_tcp_listener(tmp_path, stub, capsys):
+    env = _env(tmp_path)
+    _configure(env, "acme")
+    _write_credential(env)
+    s = stub(socket=False)
+    rc, ex = _start(env, port=s.port)
+    err = capsys.readouterr().err
+    socket_path = gateway_socket_path(state_dir("outpost", env=env))
+    assert rc != 0 and ex.calls == []
+    assert f"Outpost is unreachable at {socket_path}; is it running?" in err
+    assert s.tcp_posts == []
+    assert CREDENTIAL not in err
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root passes a folder's mode check, so no folder can deny it")
+def test_a_socket_the_operating_system_denies_us_is_not_reachable_and_nothing_goes_to_tcp(tmp_path, stub, capsys):
+    env = _env(tmp_path)
+    _configure(env, "acme")
+    _write_credential(env)
+    s = stub(socket=False)
+    socket_path = gateway_socket_path(state_dir("outpost", env=env))
+    socket_path.parent.mkdir(mode=0o700, parents=True)
+    socket_path.parent.chmod(0o000)
+    try:
+        rc, ex = _start(env, port=s.port)
+    finally:
+        socket_path.parent.chmod(0o700)
+    err = capsys.readouterr().err
+    assert rc != 0 and ex.calls == []
+    assert f"Outpost's socket at {socket_path} is not reachable from here (permission denied)" in err
+    assert s.tcp_posts == []
+
+
+def test_start_goes_over_outposts_socket_with_the_bearer_and_nothing_goes_to_tcp(tmp_path, stub):
+    # Host-only: binding a unix socket is refused inside the sandbox.
+    state = short_state_dir()
+    env = _env(tmp_path, extra={"OUTPOST_STATE_DIR": str(state)})
+    _configure(env, "acme")
+    _write_credential(env)
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            seen.append((self.path, self.headers.get("Authorization")))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+    s = stub(socket=False)
+    with unix_http_server(state, Handler):
+        rc, ex = _start(env, port=s.port)
+    assert rc == 0 and len(ex.calls) == 1
+    assert seen == [("/operator/hubs/acme/start", f"Bearer {CREDENTIAL}")]
+    assert s.tcp_posts == []
 
 
 def test_non_outpost_listener_is_treated_as_down(tmp_path, stub, capsys):
@@ -524,19 +601,10 @@ def test_the_default_start_budget_outlasts_two_worst_case_outpost_starts(monkeyp
     one_start = 3 * tmux + 3 * tmux + session_start + tmux + settle + 3 * tmux
     seen = {}
 
-    class _Opener:
-        def open(self, request, timeout):
-            seen["timeout"] = timeout
+    def fake_request(method, path, *, timeout=None, **kw):
+        seen["timeout"] = timeout
+        return outpost_http.Reply(200, {})
 
-            class _Ok:
-                def __enter__(self):
-                    return self
-
-                def __exit__(self, *a):
-                    return False
-
-            return _Ok()
-
-    monkeypatch.setattr(outpost_client, "_opener", lambda: _Opener())
+    monkeypatch.setattr(outpost_http, "request", fake_request)
     outpost_client.start_hub("acme", "cred")
     assert seen["timeout"] >= 2 * one_start

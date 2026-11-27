@@ -47,9 +47,10 @@ IDLE_TIMEOUT_SECONDS = 120.0
 _deadline: float | None = None
 
 
-def socket_path() -> Path:
-    """Outpost's gateway socket: ``gateway/gateway.sock`` under Outpost's state folder."""
-    return state_dir(OUTPOST_APP) / "gateway" / "gateway.sock"
+def socket_path(env: dict[str, str] | None = None) -> Path:
+    """Outpost's gateway socket: ``gateway/gateway.sock`` under Outpost's state folder. *env* is the environment the
+    folder is derived from (the process's by default); it selects the folder, never the socket."""
+    return state_dir(OUTPOST_APP, env=env) / "gateway" / "gateway.sock"
 
 
 class OutpostUnreachable(Exception):
@@ -109,10 +110,10 @@ class _SocketConnection(http.client.HTTPConnection):
         self.sock = sock
 
 
-def _connection(timeout: float) -> _SocketConnection:
+def _connection(timeout: float, env: dict[str, str] | None = None) -> _SocketConnection:
     """A connection to Outpost's socket. Looking the path up first leaves a missing socket, or one in a folder this
     process cannot enter, reported without opening a socket at all."""
-    path = socket_path()
+    path = socket_path(env)
     try:
         path.lstat()
     except PermissionError:
@@ -168,6 +169,7 @@ def request(
     json_body: object | None = None,
     body_file: tuple[BinaryIO, int, str] | None = None,
     timeout: float | None = None,
+    env: dict[str, str] | None = None,
 ) -> Reply:
     """One call over the gateway socket. *form* is sent urlencoded, *json_body* as JSON; the reply body is parsed as a
     JSON object.
@@ -191,7 +193,7 @@ def request(
         send_headers["Content-Length"] = str(body_file[1])
         send_headers["Content-Type"] = body_file[2]
     send_headers["Connection"] = "close"
-    conn = _connection(_timeout_for(timeout))
+    conn = _connection(_timeout_for(timeout), env)
     try:
         conn.request(method, path, body=data, headers=send_headers)
         resp = conn.getresponse()

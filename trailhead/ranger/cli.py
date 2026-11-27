@@ -89,7 +89,7 @@ def _start(
     if shutil.which("tmux", path=env.get("PATH", "")) is None:
         raise OutpostRefusal("tmux is not installed or not on PATH; ranger attaches to the hub through tmux")
     credential = outpost_client.read_operator_credential(env)
-    outpost_client.start_hub(account, credential, port=port, timeout=request_timeout)
+    outpost_client.start_hub(account, credential, env=env, timeout=request_timeout)
     nested = "TMUX" in env
     detach = (
         "detach the inner tmux with the prefix twice, then d"
