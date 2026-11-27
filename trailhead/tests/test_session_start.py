@@ -709,6 +709,26 @@ def test_a_launched_profile_allows_only_the_pinned_gateway_shim_whatever_else_th
     assert "Bash(claude plugin eval *)" in start["permissions"]["deny"]
 
 
+def test_a_workspace_launch_is_refused_when_the_gateway_shim_sits_under_the_workspace(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    env["TRAILHEAD_STATE_DIR"] = str(ws / "state")
+    with pytest.raises(HarnessError) as refused:
+        _ritual_start(env, ws)
+    message = str(refused.value)
+    assert str(ws / "state" / "bin" / "outpost-gateway") in message and str(ws) in message
+
+
+def test_a_workspace_launch_is_refused_when_the_gateway_shim_dir_is_a_symlink_into_a_write_root(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    state = Path(env["TRAILHEAD_STATE_DIR"])
+    (ws / "planted-bin").mkdir()
+    (state).mkdir(parents=True, exist_ok=True)
+    (state / "bin").symlink_to(ws / "planted-bin")
+    with pytest.raises(HarnessError) as refused:
+        _ritual_start(env, ws)
+    assert str(ws / "planted-bin" / "outpost-gateway") in str(refused.value)
+
+
 def test_a_hub_launch_excludes_no_command_from_the_sandbox(tmp_path):
     env = _fence(tmp_path)
     shim = _gateway_shim(env)

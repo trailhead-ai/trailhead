@@ -1475,6 +1475,24 @@ def _refuse_helper_code_under_write_roots(
                     )
 
 
+def _refuse_gateway_shim_under_write_roots(shim: Path, write_roots: list[Path]) -> None:
+    """Refuse a launch whose pinned gateway shim the session could rewrite.
+
+    The shim runs outside the sandbox, so it must sit outside every path the session may write,
+    as named and where it resolves (a symlinked ``bin`` directory leads into a root). A path
+    overlaps a write root when either contains the other, by whole segments.
+    """
+    for path in dict.fromkeys([shim, Path(os.path.realpath(shim))]):
+        for root in write_roots:
+            if _covers(root, path) or _covers(path, root):
+                raise HarnessError(
+                    f"the gateway shim {path} overlaps {root}, which the session may write; the shim "
+                    "runs outside the sandbox, so the session could replace it. Point "
+                    f"TRAILHEAD_STATE_DIR at a directory outside {root}, then start the session "
+                    "again; refusing the launch"
+                )
+
+
 _GIT_ADMIN_NAMES = ("config", "hooks", "info", "config.worktree")
 _GIT_SCAN_DEPTH = 3
 _GITDIR_POINTER_LIMIT = 4096
@@ -2690,6 +2708,11 @@ class ClaudeCodeHarness(Harness):
             )
             if "PATH" in source:
                 env_set = {**env_set, "PATH": source["PATH"]}
+        if ROLE_WORKSPACE in profile.paths:
+            _refuse_gateway_shim_under_write_roots(
+                _state_dir("trailhead", env=source) / "bin" / "outpost-gateway",
+                [*roots, launch_dir],
+            )
         deny_write = [
             str(launch_dir / ".claude"),
             str(launch_dir / ".mcp.json"),
