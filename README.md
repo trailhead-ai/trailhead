@@ -78,7 +78,7 @@ trailhead update       # check for (or apply) an upgrade from your source checko
 |---|---|
 | `--harness <name>` | Target a harness explicitly (repeatable). Default: auto-detect. |
 | `--plugin <name>` | Install only these agent-plugins (repeatable). Default: all. |
-| `--no-camp` / `--no-lore` / `--no-portage` | Skip installing/updating that CLI onto PATH. |
+| `--no-camp` / `--no-lore` / `--no-portage` / `--no-docket` | Skip installing/updating that CLI onto PATH. |
 | `--config <path>` | Drive the install from a TOML config (absolute, or relative to the repo `config/` dir). Default: `config/default.toml`. |
 | `--quiet` / `--json` | Suppress progress / emit a machine-readable summary. |
 
@@ -155,6 +155,7 @@ exact subagents/skills per plugin, plus local file overrides:
 install_camp_cli = true
 install_lore_cli = false
 install_portage_cli = true
+install_docket_cli = true
 
 # Top-level default plugin set, applied to every detected/--harness harness.
 plugins = ["camp", "lore", "craft", "portage", "outpost"]
@@ -197,6 +198,7 @@ subagents and skills. The full schema and resolution rules live in
 | `camp` | Worktree + group orchestration across repos |
 | `craft` | Dev rituals — planning, TDD execute, review, council |
 | `portage` | PR lifecycle — open, update, watch CI, merge |
+| `docket` | The project's docket from the terminal (CLI only so far) |
 
 `camp` and `lore` also ship standalone CLIs (`camp`, `lore`) that trailhead puts
 on your PATH.

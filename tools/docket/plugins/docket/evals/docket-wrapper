@@ -1,0 +1,31 @@
+#!__PYTHON__
+"""./docket for the docket eval runs: the real docket package, reaching lore and camp through this run's ./lore and ./camp.
+
+The only difference from the installed command is the runner handed to the command table, which is the
+seam the package takes for tests. A run directory holding the file sync-fails has every `lore sync` fail.
+"""
+import os
+import subprocess
+import sys
+
+here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(here, "docket-plugin"))
+
+from docket import changes, cli, report  # noqa: E402
+
+STAND_INS = {"lore": os.path.join(here, "lore"), "camp": os.path.join(here, "camp")}
+
+
+def runner(argv):
+    argv = list(argv)
+    if argv[:2] == ["lore", "sync"] and os.path.exists(os.path.join(here, "sync-fails")):
+        return subprocess.CompletedProcess(argv, 1, "", "lore sync: could not reach the remote\n")
+    argv[0] = STAND_INS.get(argv[0], argv[0])
+    return subprocess.run(argv, capture_output=True, text=True, timeout=60)
+
+
+cli.COMMANDS.update(changes.make_commands(runner))
+cli.COMMANDS["report"] = report.make_command(runner)
+
+if __name__ == "__main__":
+    sys.exit(cli.main())

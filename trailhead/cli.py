@@ -106,7 +106,7 @@ Install is config-driven and non-interactive. By default it auto-detects your
 harness (e.g. ~/.claude → claude_code) and installs every plugin. Override with:
   --harness <name>   target a harness explicitly (repeatable; e.g. claude_code)
   --plugin <name>    install only these plugins (repeatable; default: all)
-  --no-camp/--no-lore/--no-portage  skip installing that CLI onto PATH
+  --no-camp/--no-lore/--no-portage/--no-docket  skip installing that CLI onto PATH
   --config <path>    drive the install from a TOML config (see config/default.toml)
 
 Run `trailhead <command> --help` for details on each command.
@@ -125,6 +125,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
         no_camp=args.no_camp,
         no_lore=args.no_lore,
         no_portage=args.no_portage,
+        no_docket=args.no_docket,
         quiet=args.quiet,
         as_json=args.json,
     )
@@ -456,6 +457,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Skip installing/updating the portage CLI onto PATH.",
+    )
+    install_p.add_argument(
+        "--no-docket",
+        action="store_true",
+        default=False,
+        help="Skip installing/updating the docket CLI onto PATH.",
     )
     install_p.add_argument(
         "--config",

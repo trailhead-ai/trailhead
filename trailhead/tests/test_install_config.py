@@ -90,6 +90,20 @@ class TestFlagsAndDefaults:
         )
         assert cfg.cli_flags["portage"] is False
 
+    def test_no_docket_flag(self):
+        cfg = resolve_config(detected_harnesses=["claude_code"], no_docket=True)
+        assert cfg.cli_flags["docket"] is False
+        assert cfg.cli_flags["camp"] is True
+
+    def test_docket_cli_flag_defaults_true(self):
+        cfg = resolve_config(detected_harnesses=["claude_code"])
+        assert cfg.cli_flags["docket"] is True
+
+    def test_config_can_set_install_docket_cli(self, tmp_path):
+        path = _write(tmp_path, "install_docket_cli = false\nplugins=[]\n")
+        cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
+        assert cfg.cli_flags["docket"] is False
+
     def test_portage_cli_flag_defaults_true(self):
         cfg = resolve_config(detected_harnesses=["claude_code"])
         assert cfg.cli_flags["portage"] is True
@@ -105,6 +119,7 @@ class TestFlagsAndDefaults:
             "install_camp_cli = false\n"
             "install_lore_cli = true\n"
             "install_portage_cli = false\n"
+            "install_docket_cli = true\n"
             "plugins=[]\n",
         )
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
@@ -112,6 +127,7 @@ class TestFlagsAndDefaults:
             "camp": False,
             "lore": True,
             "portage": False,
+            "docket": True,
         }
 
 
@@ -171,7 +187,7 @@ class TestPluginExpansion:
         path = _write(tmp_path, "install_camp_cli = true\n")  # no plugins key
         cfg = resolve_config(config_path=path, detected_harnesses=["claude_code"])
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage", "outpost", "trailhead"]
+        assert names == ["camp", "lore", "craft", "portage", "outpost", "trailhead", "docket"]
 
     def test_selecting_trailhead_includes_its_hook(self):
         cfg = resolve_config(cli_harnesses=["claude_code"], cli_plugins=["camp", "trailhead"])
@@ -306,8 +322,9 @@ class TestShippedDefault:
         assert cfg.cli_flags["camp"] is True
         assert cfg.cli_flags["lore"] is True
         assert cfg.cli_flags["portage"] is True
+        assert cfg.cli_flags["docket"] is True
         names = [p.name for p in cfg.harnesses[0].plugins]
-        assert names == ["camp", "lore", "craft", "portage", "outpost", "trailhead"]
+        assert names == ["camp", "lore", "craft", "portage", "outpost", "trailhead", "docket"]
 
 
 # ---------------------------------------------------------------------------

@@ -32,7 +32,7 @@ from trailhead.compose import apply_plan, compose_plan
 _HOOK_SCRIPT_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\"\s\\]+)")
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
-_TOOLS = ["lore", "camp", "craft", "portage", "outpost", "trailhead"]
+_TOOLS = ["lore", "camp", "craft", "portage", "outpost", "trailhead", "docket"]
 
 
 def _manifest_path(tool: str) -> Path:

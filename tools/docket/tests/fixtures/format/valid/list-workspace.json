@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "entries": [
+    {"kind": "task", "slug": "beta", "workspace": {"group": "trailhead", "slug": "docket"}},
+    {"kind": "blob", "slug": "a-note"}
+  ]
+}

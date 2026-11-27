@@ -37,7 +37,7 @@ from trailhead.capabilities import load_manifest
 from trailhead.compose import apply_plan, compose_plan
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_TOOLS = ["lore", "camp", "craft", "portage", "outpost", "trailhead"]
+_TOOLS = ["lore", "camp", "craft", "portage", "outpost", "trailhead", "docket"]
 
 
 def _declared_name(md: Path) -> str | None:

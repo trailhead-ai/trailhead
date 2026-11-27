@@ -16,6 +16,7 @@ Config TOML schema
     install_camp_cli = true            # default true
     install_lore_cli = true            # default true
     install_portage_cli = true         # default true
+    install_docket_cli = true          # default true
     plugins = ["camp", "lore", ...]    # top-level default plugin set (optional)
 
 Each ``install_<name>_cli`` key is generic: it exists for every tool whose
@@ -69,7 +70,7 @@ from trailhead.harness import canonical_name, known_harness_names
 from trailhead.wire import default_manifest_paths
 
 # Canonical display/install order for the agent-plugins.
-KNOWN_PLUGIN_ORDER = ["camp", "lore", "craft", "portage", "outpost", "trailhead"]
+KNOWN_PLUGIN_ORDER = ["camp", "lore", "craft", "portage", "outpost", "trailhead", "docket"]
 
 
 class ConfigResolveError(Exception):
@@ -244,6 +245,7 @@ def resolve_config(
     no_camp: bool = False,
     no_lore: bool = False,
     no_portage: bool = False,
+    no_docket: bool = False,
     detected_harnesses: list[str] | None = None,
     manifest_paths: dict[str, Path] | None = None,
 ) -> ResolvedConfig:
@@ -254,7 +256,7 @@ def resolve_config(
                             (CLI/detection-only) resolution.
         cli_harnesses:      ``--harness`` values (override config + detection).
         cli_plugins:        ``--plugin`` values (REPLACE the per-harness plugin set).
-        no_camp / no_lore / no_portage:  Force the camp/lore/portage CLI
+        no_camp / no_lore / no_portage / no_docket:  Force the camp/lore/portage/docket CLI
                             install flag off.
         detected_harnesses: Harness names detected on the machine (fallback when
                             neither CLI nor config name a harness).
@@ -275,6 +277,8 @@ def resolve_config(
         cli_flags["lore"] = False
     if no_portage and "portage" in cli_flags:
         cli_flags["portage"] = False
+    if no_docket and "docket" in cli_flags:
+        cli_flags["docket"] = False
 
     harness_blocks = data.get("harness", [])
     if not isinstance(harness_blocks, list):

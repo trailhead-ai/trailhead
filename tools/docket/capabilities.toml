@@ -1,0 +1,8 @@
+# docket — the terminal tool for the project's docket. CLI-bearing: `trailhead install` puts
+# `docket` on PATH. tool.name MUST equal the plugins/<name>/ dir ("docket").
+# Selectable skills (skills/*/ with SKILL.md) and subagents (agents/*.md) are discovered on
+# disk: the plugin ships the docket skill (skills/docket/SKILL.md), no subagents and no always-on base.
+
+[tool]
+name = "docket"
+cli_bin = "bin/docket"

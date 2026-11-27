@@ -1,0 +1,119 @@
+[
+  {
+    "file": "valid/list-empty.json",
+    "kind": "list",
+    "valid": true,
+    "entries": []
+  },
+  {
+    "file": "valid/list-one.json",
+    "kind": "list",
+    "valid": true,
+    "entries": [
+      {
+        "kind": "task",
+        "slug": "alpha"
+      }
+    ]
+  },
+  {
+    "file": "valid/list-workspace.json",
+    "kind": "list",
+    "valid": true,
+    "entries": [
+      {
+        "kind": "task",
+        "slug": "beta",
+        "workspace": {
+          "group": "trailhead",
+          "slug": "docket"
+        }
+      },
+      {
+        "kind": "blob",
+        "slug": "a-note"
+      }
+    ]
+  },
+  {
+    "file": "valid/order.json",
+    "kind": "order",
+    "valid": true,
+    "order": [
+      "main",
+      "levr"
+    ]
+  },
+  {
+    "file": "valid/order-empty.json",
+    "kind": "order",
+    "valid": true,
+    "order": []
+  },
+  {
+    "file": "invalid/list-conflict.json",
+    "kind": "list",
+    "valid": false,
+    "refusal": "conflict"
+  },
+  {
+    "file": "invalid/list-duplicate-key.json",
+    "kind": "list",
+    "valid": false,
+    "refusal": "duplicate-key"
+  },
+  {
+    "file": "invalid/list-nan.json",
+    "kind": "list",
+    "valid": false,
+    "refusal": "nan"
+  },
+  {
+    "file": "invalid/list-unknown-key.json",
+    "kind": "list",
+    "valid": false,
+    "refusal": "unknown-key"
+  },
+  {
+    "file": "invalid/list-wrong-version.json",
+    "kind": "list",
+    "valid": false,
+    "refusal": "wrong-version"
+  },
+  {
+    "file": "invalid/list-newer-version.json",
+    "kind": "list",
+    "valid": false,
+    "refusal": "newer-version"
+  },
+  {
+    "file": "invalid/list-duplicate-entry.json",
+    "kind": "list",
+    "valid": false,
+    "refusal": "duplicate-entry"
+  },
+  {
+    "file": "invalid/list-unsafe-slug.json",
+    "kind": "list",
+    "valid": false,
+    "refusal": "unsafe-value"
+  },
+  {
+    "file": "invalid/list-truncated.json",
+    "kind": "list",
+    "valid": false,
+    "refusal": "invalid-json"
+  },
+  {
+    "file": "invalid/order-duplicate.json",
+    "kind": "order",
+    "valid": false,
+    "refusal": "duplicate-entry"
+  },
+  {
+    "file": "invalid/order-unsafe-vault.json",
+    "kind": "order",
+    "valid": false,
+    "refusal": "unsafe-value"
+  }
+]

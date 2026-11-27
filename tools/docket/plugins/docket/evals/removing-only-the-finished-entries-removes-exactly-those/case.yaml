@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: removing-only-the-finished-entries-removes-exactly-those
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

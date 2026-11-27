@@ -72,9 +72,11 @@ jobs:
           # rest's ceiling counts one skip that is permanent in CI: the test that the ranger
           # contract fixture equals Outpost's copy needs an Outpost checkout beside this repo,
           # and Outpost is private while this workflow is public.
+          # It also counts the docket row of the hooks-wiring test, which skips because docket
+          # declares no hooks_json.
           - area: rest
-            baseline: 4319
-            max_skipped: 31
+            baseline: 6917
+            max_skipped: 32
             budget: 100
     steps:
       - name: Check out the repository
@@ -195,7 +197,7 @@ jobs:
             budget: 130
           - tier: seam_real
             workers: auto
-            baseline: 330
+            baseline: 554
             max_skipped: 0
             budget: 120
     steps:
