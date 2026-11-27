@@ -14,10 +14,12 @@ from pathlib import Path
 import pytest
 
 from _docket_cli import PLUGIN_ROOT, install, run_cli
-from test_changes import env, hermetic_git_env  # noqa: F401  (fixtures)
 from trailhead.tests._git_support import make_hermetic_git_env
 
 from docket import changes
+
+# The env and hermetic_git_env fixtures live in _docket_env; registering it shares them.
+pytest_plugins = ["_docket_env"]
 
 pytestmark = pytest.mark.seam_real
 

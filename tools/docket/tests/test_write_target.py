@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from test_changes import env, hermetic_git_env, ref  # noqa: F401  (fixtures)
+from _docket_env import ref
+
+# The env and hermetic_git_env fixtures live in _docket_env; registering it shares them.
+pytest_plugins = ["_docket_env"]
 
 
 def _files(root):

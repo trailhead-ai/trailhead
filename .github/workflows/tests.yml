@@ -75,7 +75,7 @@ jobs:
           # It also counts the docket row of the hooks-wiring test, which skips because docket
           # declares no hooks_json.
           - area: rest
-            baseline: 4319
+            baseline: 6917
             max_skipped: 32
             budget: 100
     steps:
@@ -197,7 +197,7 @@ jobs:
             budget: 130
           - tier: seam_real
             workers: auto
-            baseline: 330
+            baseline: 554
             max_skipped: 0
             budget: 120
     steps:

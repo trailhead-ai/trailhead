@@ -75,9 +75,3 @@ extend-exclude = ["tools/craft/tests/fixtures/candidate_set_pre_linear_fix_basel
 [tool.ruff.lint]
 # E/W = pycodestyle (the PEP 8 checker), F = pyflakes (unused imports/vars, etc.).
 select = ["E", "W", "F"]
-
-[tool.ruff.lint.per-file-ignores]
-# docket's shared fixtures (env) are imported from test_changes, because a second bare
-# conftest.py would collide with the other tools' under pytest's prepend import mode; a test
-# taking env as a parameter is the pytest fixture idiom, which F811 reads as a redefinition.
-"tools/docket/tests/test_*.py" = ["F811"]

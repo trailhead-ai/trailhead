@@ -17,11 +17,13 @@ from pathlib import Path
 import pytest
 
 from _docket_cli import PLUGIN_ROOT, completed, run_cli, vault_ls
-from test_changes import env, hermetic_git_env  # noqa: F401  (fixtures)
 
 from docket import cli, report
 from docket.clean import clean
 from docket.store import DocketList, Entry, Store, Workspace
+
+# The env and hermetic_git_env fixtures live in _docket_env; registering it shares them.
+pytest_plugins = ["_docket_env"]
 
 FIXTURES = Path(__file__).parent / "fixtures"
 ZERO_WIDTH = chr(0x200B)
