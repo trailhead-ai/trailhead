@@ -33,6 +33,7 @@ import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
+from unittest import mock
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -46,6 +47,7 @@ from ._gateway_support import (
     free_port,
     gateway_runner_cmd,
     gateway_socket_path,
+    register_port_interpreter,
     register_runner_cmd,
     runner_env,
     short_state_dir,
@@ -98,6 +100,13 @@ def trailhead_checkout() -> Path:
     if not (path / "trailhead" / "gateway" / "command.py").is_file():
         raise AssertionError(f"no trailhead checkout at {path}; set TRAILHEAD_GATEWAY_E2E_TRAILHEAD")
     return path
+
+
+def trailhead_serves_gateway_socket(checkout: Path) -> bool:
+    """Whether the trailhead checkout's gateway client talks to Outpost on a unix socket; one from before that has a
+    fixed TCP port, which `_register_port/sitecustomize.py` has to move."""
+    client = checkout / "trailhead" / "gateway" / "outpost_http.py"
+    return client.is_file() and "def socket_path(" in client.read_text()
 
 
 def dotfiles_checkout() -> Path:
@@ -230,10 +239,20 @@ def real_outpost(
         shutil.rmtree(state, ignore_errors=True)
 
 
-def step_env(root: Path, outpost: RealOutpost) -> dict[str, str]:
-    """The environment the trailhead side runs in: where Outpost's state is, and a scratch trailhead state."""
+def step_env(root: Path, outpost: RealOutpost, *, port: int | None = None) -> dict[str, str]:
+    """The environment the trailhead side runs in: where Outpost's state is, and a scratch trailhead state.
+
+    A trailhead checkout from before the gateway socket reaches Outpost on a fixed TCP port, so its steps also get
+    the stand-in that moves it to *port* (the `TokenRecorder`'s, else Outpost's own).
+    """
+    checkout = trailhead_checkout()
+    python_path = str(checkout)
+    extra = {}
+    if not trailhead_serves_gateway_socket(checkout):
+        python_path = f"{Path(__file__).with_name('_register_port')}{os.pathsep}{checkout}"
+        extra = {"TRAILHEAD_TEST_REGISTER_PORT": str(port or outpost.port), "TRAILHEAD_TEST_REPO_ROOT": str(checkout)}
     return runner_env(
-        outpost.state, trailhead_state=root / "trailhead-state", extra={"PYTHONPATH": str(trailhead_checkout())}
+        outpost.state, trailhead_state=root / "trailhead-state", extra={"PYTHONPATH": python_path, **extra}
     )
 
 
@@ -327,7 +346,7 @@ def render_sandbox_settings(
     return {"sandbox": sandbox, "permissions": {"allow": allow, "deny": deny}}
 
 
-def install_shims(root: Path, outpost: RealOutpost) -> Path:
+def install_shims(root: Path, outpost: RealOutpost, *, port: int | None = None) -> Path:
     """The bin dir the real ``trailhead install`` writes the gateway shims into, aimed at *outpost*.
 
     ``build_cli_shims`` with the Outpost tool enabled writes the pinned ``outpost-gateway`` and
@@ -336,6 +355,9 @@ def install_shims(root: Path, outpost: RealOutpost) -> Path:
     install bakes the operator's). The shims run the real gateway command and the real hook's registration
     step. Both reach Outpost on the gateway socket under the baked Outpost state folder, so nothing about them is
     replaced; a ``TokenRecorder`` entered on that state folder sits in front of the socket they use.
+
+    A trailhead checkout from before the socket has a fixed TCP port instead, so its shims are pinned to
+    ``register_port_interpreter``, a stand-in that aims them at *port* (the recorder's, else Outpost's own).
     """
     env = {
         "TRAILHEAD_STATE_DIR": str(root / "trailhead-state"),
@@ -343,11 +365,17 @@ def install_shims(root: Path, outpost: RealOutpost) -> Path:
         "HOME": str(root / "outpost-home"),
     }
     checkout = trailhead_checkout()
-    return build_gateway_shims(
-        resolve_cli_tools({"camp": True, "lore": True, "portage": True}),
-        env=env,
-        checkout=make_trusted_checkout(root / "trusted-checkout", checkout),
+    interpreter = (
+        None
+        if trailhead_serves_gateway_socket(checkout)
+        else str(register_port_interpreter(root / "interp", port or outpost.port, checkout))
     )
+    with mock.patch("trailhead.pathint.sys.executable", interpreter or sys.executable):
+        return build_gateway_shims(
+            resolve_cli_tools({"camp": True, "lore": True, "portage": True}),
+            env=env,
+            checkout=make_trusted_checkout(root / "trusted-checkout", checkout),
+        )
 
 
 def sandbox_steps(state: Path, other_port: int, gateway: Path, outpost_port: int) -> dict[str, str]:
@@ -1414,24 +1442,20 @@ _BEARER = re.compile(rb"[Aa]uthorization:\s*Bearer\s+([A-Za-z0-9._~+/=-]+)")
 _ACCESS_TOKEN = re.compile(rb'"access_token"\s*:\s*"([^"]+)"')
 
 
-class TokenRecorder:
-    """A relay in front of Outpost's gateway socket that learns every access token the gateway command sends or is
-    given.
+class _TokenRelay:
+    """The relaying half of a token recorder: accepts clients on ``_server``, pumps bytes both ways to the upstream
+    ``_connect_upstream`` opens, and learns each ``Authorization: Bearer`` value and each ``access_token`` answer."""
 
-    The tokens live only in the command's memory and Outpost stores their hash, so the one place they can be
-    read to be looked for elsewhere is the wire. Entered on Outpost's state folder, it moves the running Outpost's
-    socket aside (a bound socket keeps accepting under its new name) and listens at the socket's place, so the
-    command, which finds the socket by that place, talks to the relay; ``tokens`` holds each
-    ``Authorization: Bearer`` value and each ``access_token`` answer. Leaving puts the socket back.
-    """
+    port: int | None = None
 
-    def __init__(self, state: Path) -> None:
-        self.socket_path = gateway_socket_path(state)
-        self.upstream_path = self.socket_path.with_name("gateway.upstream.sock")
+    def __init__(self) -> None:
         self.tokens: set[str] = set()
         self._server: socket.socket | None = None
         self._open: list[socket.socket] = []
         self._thread = threading.Thread(target=self._accept, daemon=True)
+
+    def _connect_upstream(self) -> socket.socket:
+        raise NotImplementedError
 
     def _accept(self) -> None:
         while True:
@@ -1442,13 +1466,9 @@ class TokenRecorder:
             threading.Thread(target=self._relay, args=(client,), daemon=True).start()
 
     def _relay(self, client: socket.socket) -> None:
-        upstream = socket.socket(socket.AF_UNIX)
         try:
-            upstream.settimeout(30)
-            upstream.connect(str(self.upstream_path))
-            upstream.settimeout(None)
+            upstream = self._connect_upstream()
         except OSError:
-            upstream.close()
             client.close()
             return
         self._open += [client, upstream]
@@ -1472,6 +1492,39 @@ class TokenRecorder:
                 except OSError:
                     pass
 
+    def _close_connections(self) -> None:
+        self._server.close()
+        for sock in self._open:
+            sock.close()
+
+
+class TokenRecorder(_TokenRelay):
+    """A relay in front of Outpost's gateway socket that learns every access token the gateway command sends or is
+    given.
+
+    The tokens live only in the command's memory and Outpost stores their hash, so the one place they can be
+    read to be looked for elsewhere is the wire. Entered on Outpost's state folder, it moves the running Outpost's
+    socket aside (a bound socket keeps accepting under its new name) and listens at the socket's place, so the
+    command, which finds the socket by that place, talks to the relay; ``tokens`` holds each
+    ``Authorization: Bearer`` value and each ``access_token`` answer. Leaving puts the socket back.
+    """
+
+    def __init__(self, state: Path) -> None:
+        super().__init__()
+        self.socket_path = gateway_socket_path(state)
+        self.upstream_path = self.socket_path.with_name("gateway.upstream.sock")
+
+    def _connect_upstream(self) -> socket.socket:
+        upstream = socket.socket(socket.AF_UNIX)
+        try:
+            upstream.settimeout(30)
+            upstream.connect(str(self.upstream_path))
+            upstream.settimeout(None)
+        except OSError:
+            upstream.close()
+            raise
+        return upstream
+
     def __enter__(self) -> TokenRecorder:
         os.rename(self.socket_path, self.upstream_path)
         self._server = socket.socket(socket.AF_UNIX)
@@ -1482,11 +1535,40 @@ class TokenRecorder:
         return self
 
     def __exit__(self, *exc) -> None:
-        self._server.close()
-        for sock in self._open:
-            sock.close()
+        self._close_connections()
         self.socket_path.unlink(missing_ok=True)
         os.rename(self.upstream_path, self.socket_path)
+
+
+class TcpTokenRecorder(_TokenRelay):
+    """The same relay for an Outpost from before the gateway socket, which serves the gateway on TCP only: a
+    loopback relay to Outpost's port. Aim the command at ``port`` (the test's stand-in interpreter does)."""
+
+    def __init__(self, target_port: int) -> None:
+        super().__init__()
+        self.target_port = target_port
+
+    def _connect_upstream(self) -> socket.socket:
+        return socket.create_connection(("127.0.0.1", self.target_port), timeout=30)
+
+    def __enter__(self) -> TcpTokenRecorder:
+        self._server = socket.socket()
+        self._server.bind(("127.0.0.1", 0))
+        self._server.listen(32)
+        self.port = self._server.getsockname()[1]
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._close_connections()
+
+
+def token_recorder(outpost: RealOutpost) -> TokenRecorder | TcpTokenRecorder:
+    """The recorder for the Outpost under test: on its gateway socket when its checkout serves one, else on its TCP
+    port."""
+    if outpost_serves_gateway_socket(outpost_checkout()):
+        return TokenRecorder(outpost.state)
+    return TcpTokenRecorder(outpost.port)
 
 
 def known_secrets(outpost: RealOutpost, tokens: set[str]) -> dict[str, str]:

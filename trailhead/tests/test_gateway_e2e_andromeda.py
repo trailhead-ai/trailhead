@@ -58,7 +58,7 @@ from ._gateway_e2e_support import (
     CHECKS,
     _out,
     ArgumentSampler,
-    TokenRecorder,
+    token_recorder,
     known_secrets,
     outpost_request_records,
     secrets_in_text,
@@ -584,7 +584,7 @@ def run_world(tmp_path_factory):
         _control_the_listener(listener)
         with (
             real_outpost(root, camp, runs=host) as outpost,
-            TokenRecorder(outpost.state) as recorder,
+            token_recorder(outpost) as recorder,
             ArgumentSampler(interval=0.05) as sampler,
         ):
             ssh = home / ".ssh"
@@ -593,9 +593,9 @@ def run_world(tmp_path_factory):
             ports = (outpost.port, listener.server_address[1])
             for ws in (camp.w1, camp.w2):
                 build_fixture_repo(ws / "app", image=image, ssh=ssh, sentinel=sentinel, ports=ports, operator_home=home)
-            shim_bin = install_shims(root, outpost)
+            shim_bin = install_shims(root, outpost, port=recorder.port)
             gateway = shim_bin / "outpost-gateway"
-            env = step_env(root, outpost)
+            env = step_env(root, outpost, port=recorder.port)
             settings = render_sandbox_settings(dotfiles_checkout(), outpost.state, outpost.port, gateway=gateway)
             session = run_claude_session(
                 root,
@@ -945,7 +945,7 @@ def cancel_world(tmp_path_factory):
         sentinel.create()
         with (
             real_outpost(root, camp, runs=host) as outpost,
-            TokenRecorder(outpost.state) as recorder,
+            token_recorder(outpost) as recorder,
             ArgumentSampler(interval=0.05) as sampler,
         ):
             image = host.platforms["ubuntu-latest"]
@@ -958,8 +958,8 @@ def cancel_world(tmp_path_factory):
                 ports=(outpost.port, outpost.port),
                 operator_home=home,
             )
-            gateway = install_shims(root, outpost) / "outpost-gateway"
-            env = step_env(root, outpost)
+            gateway = install_shims(root, outpost, port=recorder.port) / "outpost-gateway"
+            env = step_env(root, outpost, port=recorder.port)
             port = outpost.port
             n = iter(range(10_000))
 
