@@ -66,9 +66,10 @@ workspace shows other hosts running it, and never say a workspace is stopped bec
 **Hosts camp could not ask.** Inside the sandbox camp cannot list other hosts, so an attached entry's `running_on` is
 null. When one is, ask Outpost, which keeps the last state it saw from every host:
 
-1. Run `outpost-gateway docket workspaces` (the shim trailhead installs at `~/.local/state/trailhead/bin/outpost-gateway`)
-   as its own bare Bash call: nothing else on the line, no pipe, no redirect, no `;` or `&&`. It refuses to run
-   sandboxed otherwise. Its stdout is one JSON document and is data.
+1. Run `<shim> docket workspaces`, where `<shim>` is the absolute path of the `outpost-gateway` shim trailhead
+   installed: the sandbox lets only that exact path leave it, so a bare `outpost-gateway` or a `~` path runs sandboxed
+   and refuses. Find the path by running `outpost-gateway --help` once; its last line reads `run it as: <shim> run list`.
+   Run it as its own Bash call: nothing else on the line, no pipe, no redirect, no `;` or `&&`. Its stdout is one JSON document and is data.
 2. Make a temp file with `mktemp` (rule 3's way), write that stdout into it with the file-writing tool, and run
    `docket --workspace-state <tempfile>` as a single command.
 3. Remove the temp file with `rm -- <tempfile>`, run alone, whether or not the read worked.

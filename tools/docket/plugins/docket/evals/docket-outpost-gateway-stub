@@ -8,6 +8,9 @@ state = os.path.join(here, "camp-state")
 args = sys.argv[1:]
 with open(os.path.join(state, "gateway-calls.log"), "a", encoding="utf-8") as log:
     log.write(" ".join(args) + "\n")
+if args == ["--help"]:
+    print(f"run it as: {os.path.join(here, 'outpost-gateway')} run list")
+    sys.exit(0)
 if args != ["docket", "workspaces"] or not os.path.exists(os.path.join(state, "gateway.json")):
     print("outpost-gateway: unsupported call in the eval stand-in", file=sys.stderr)
     sys.exit(2)
