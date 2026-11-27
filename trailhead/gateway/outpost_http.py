@@ -26,7 +26,9 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import os
 import socket
+import stat
 import time
 import urllib.parse
 from collections.abc import Iterator
@@ -71,6 +73,16 @@ class SocketNotReachable(Exception):
         self.message = f"Outpost's socket at {path} is not reachable from here (permission denied)"
 
 
+class UnsafeSocket(SocketNotReachable):
+    """The gateway socket or its folder is not what Outpost makes for the operator alone, so nothing was sent.
+    ``reason`` is one of folder-not-a-directory, folder-owner, folder-mode, not-a-socket, socket-owner."""
+
+    def __init__(self, path: Path, reason: str) -> None:
+        super().__init__(path)
+        self.reason = reason
+        self.message = f"Outpost's socket at {path} is not safe to use ({reason}); refusing to send anything to it"
+
+
 class ReplyTimedOut(OutpostUnreachable):
     """The request was sent and Outpost did not answer in time: it may or may not have acted on it."""
 
@@ -112,16 +124,41 @@ class _SocketConnection(http.client.HTTPConnection):
         self.sock = sock
 
 
-def _connection(timeout: float, env: dict[str, str] | None = None) -> _SocketConnection:
-    """A connection to Outpost's socket. Looking the path up first leaves a missing socket, or one in a folder this
-    process cannot enter, reported without opening a socket at all."""
-    path = socket_path(env)
+_lstat = os.lstat
+
+
+def _operator_uid() -> int:
+    return os.geteuid()
+
+
+def _check_socket_site(path: Path) -> None:
+    """Refuse, before anything is sent, a socket folder that is a link, is not ours or is open to group or other,
+    and a gateway path that is not a socket we own. A missing path or one in a folder we cannot enter is reported as
+    it always was."""
+    uid = _operator_uid()
     try:
-        path.lstat()
+        folder = _lstat(path.parent)
+        info = _lstat(path)
     except PermissionError:
         raise SocketNotReachable(path) from None
     except OSError:
         raise OutpostUnreachable(path) from None
+    if not stat.S_ISDIR(folder.st_mode):
+        raise UnsafeSocket(path, "folder-not-a-directory")
+    if folder.st_uid != uid:
+        raise UnsafeSocket(path, "folder-owner")
+    if stat.S_IMODE(folder.st_mode) & 0o077:
+        raise UnsafeSocket(path, "folder-mode")
+    if not stat.S_ISSOCK(info.st_mode):
+        raise UnsafeSocket(path, "not-a-socket")
+    if info.st_uid != uid:
+        raise UnsafeSocket(path, "socket-owner")
+
+
+def _connection(timeout: float, env: dict[str, str] | None = None) -> _SocketConnection:
+    """A connection to Outpost's socket, after :func:`_check_socket_site` has passed it."""
+    path = socket_path(env)
+    _check_socket_site(path)
     return _SocketConnection(path, timeout)
 
 

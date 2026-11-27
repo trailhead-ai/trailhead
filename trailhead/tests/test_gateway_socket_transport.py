@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import socket
+import stat
 
 import pytest
 
@@ -90,3 +91,100 @@ def test_an_exhausted_reach_budget_names_the_socket_of_the_env_the_caller_passed
         with pytest.raises(outpost_http.OutpostUnreachable) as raised:
             outpost_http.request("GET", "/health", env={"OUTPOST_STATE_DIR": str(other)})
     assert raised.value.path == other / "gateway" / "gateway.sock"
+
+
+def _as_socket(real_lstat, socket_path, *, uid=None, folder_uid=None):
+    """An lstat that reports *socket_path* as a socket (a bind is impossible in some sandboxes), optionally owned by *uid*."""
+
+    def lstat(path):
+        info = real_lstat(path)
+        if str(path) == str(socket_path):
+            fields = list(info)
+            fields[0] = stat.S_IFSOCK | 0o600
+            if uid is not None:
+                fields[4] = uid
+            return os.stat_result(fields)
+        if folder_uid is not None and str(path) == str(socket_path.parent):
+            fields = list(info)
+            fields[4] = folder_uid
+            return os.stat_result(fields)
+        return info
+
+    return lstat
+
+
+def _fake_site(tmp_path, monkeypatch, *, folder_mode=0o700, socket_kind="file", uid=None, folder_uid=None):
+    state = tmp_path / "state"
+    folder = state / "gateway"
+    folder.mkdir(mode=0o700, parents=True)
+    folder.chmod(folder_mode)
+    path = folder / "gateway.sock"
+    if socket_kind == "file":
+        path.write_text("")
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+    monkeypatch.setattr(outpost_http, "_lstat", _as_socket(os.lstat, path, uid=uid, folder_uid=folder_uid))
+    return path
+
+
+def test_a_private_folder_holding_a_socket_we_own_is_connected_to(tmp_path, monkeypatch):
+    path = _fake_site(tmp_path, monkeypatch)
+    assert outpost_http._connection(1.0)._path == path
+
+
+@pytest.mark.parametrize("mode", [0o755, 0o750, 0o705, 0o770, 0o777, 0o701])
+def test_a_socket_folder_open_to_group_or_other_is_refused_before_anything_is_sent(tmp_path, monkeypatch, mode):
+    _fake_site(tmp_path, monkeypatch, folder_mode=mode)
+    with pytest.raises(outpost_http.UnsafeSocket) as raised:
+        outpost_http.request("POST", "/broker/token", form={"client_secret": "SEEDED-SECRET-7731"})
+    assert "SEEDED-SECRET-7731" not in raised.value.message
+    assert raised.value.reason == "folder-mode"
+    assert isinstance(raised.value, outpost_http.SocketNotReachable)
+
+
+def test_a_socket_folder_that_is_a_symlink_is_refused(tmp_path, monkeypatch):
+    path = _fake_site(tmp_path, monkeypatch)
+    real = path.parent.rename(tmp_path / "elsewhere")
+    path.parent.symlink_to(real)
+    monkeypatch.setattr(outpost_http, "_lstat", _as_socket(os.lstat, real / "gateway.sock"))
+    with pytest.raises(outpost_http.UnsafeSocket) as raised:
+        outpost_http._connection(1.0)
+    assert raised.value.reason == "folder-not-a-directory"
+
+
+def test_a_socket_folder_owned_by_someone_else_is_refused(tmp_path, monkeypatch):
+    _fake_site(tmp_path, monkeypatch, folder_uid=os.geteuid() + 1)
+    with pytest.raises(outpost_http.UnsafeSocket) as raised:
+        outpost_http._connection(1.0)
+    assert raised.value.reason == "folder-owner"
+
+
+def test_a_gateway_path_that_is_not_a_socket_is_refused(tmp_path, monkeypatch):
+    path = _fake_site(tmp_path, monkeypatch)
+    monkeypatch.setattr(outpost_http, "_lstat", os.lstat)
+    assert path.is_file()
+    with pytest.raises(outpost_http.UnsafeSocket) as raised:
+        outpost_http._connection(1.0)
+    assert raised.value.reason == "not-a-socket"
+
+
+def test_a_socket_owned_by_someone_else_is_refused(tmp_path, monkeypatch):
+    _fake_site(tmp_path, monkeypatch, uid=os.geteuid() + 1)
+    with pytest.raises(outpost_http.UnsafeSocket) as raised:
+        outpost_http._connection(1.0)
+    assert raised.value.reason == "socket-owner"
+
+
+def test_a_missing_socket_in_a_private_folder_is_still_outpost_not_running(tmp_path, monkeypatch):
+    path = _fake_site(tmp_path, monkeypatch, socket_kind="none")
+    with pytest.raises(outpost_http.OutpostUnreachable) as raised:
+        outpost_http._connection(1.0)
+    assert raised.value.path == path
+
+
+def test_host_only_a_real_socket_in_a_folder_open_to_others_is_refused_and_sent_nothing(state):
+    # Host-only: binding a unix socket is refused inside the sandbox.
+    with StubOutpost() as stub:
+        gateway_socket_path(state).parent.chmod(0o755)
+        with pytest.raises(outpost_http.UnsafeSocket):
+            outpost_http.request("GET", "/gateway/runs")
+        assert stub.requests == []
