@@ -36,9 +36,10 @@ from trailhead.launch_profile import (
     resolve_profile,
     workspace_containing,
 )
+from trailhead.gateway import outpost_http
 from trailhead.ranger import outpost_client
 from trailhead.ranger.config import HubConfig, write_hub_config
-from trailhead.tests.test_ranger_start import OUTPOST_REFUSAL_BODIES, _Stub
+from trailhead.tests.test_ranger_start import OUTPOST_REFUSAL_BODIES
 
 REPO = Path(__file__).resolve().parents[2]
 GOLDEN = Path(__file__).parent / "fixtures" / "session_start_hub.json"
@@ -942,12 +943,11 @@ def test_the_diagnostic_ranger_prints_for_a_refused_hub_launch_reproduces_the_ne
     _configure_hub(env)
     home, lore, cache = _hub_roots(env)
     user = _write_user_settings(env, {"model": "opus"})
-    stub = _Stub(status=422, body=OUTPOST_REFUSAL_BODIES[0])
-    try:
-        with pytest.raises(outpost_client.OutpostRefusal) as raised:
-            outpost_client.start_hub("a", "credential", port=stub.port, timeout=5.0)
-    finally:
-        stub.close()
+    monkeypatch.setattr(
+        outpost_http, "request", lambda *a, **kw: outpost_http.Reply(422, OUTPOST_REFUSAL_BODIES[0])
+    )
+    with pytest.raises(outpost_client.OutpostRefusal) as raised:
+        outpost_client.start_hub("a", "credential", timeout=5.0)
     command = re.search(r"`([^`]+)`", str(raised.value)).group(1)
     argv = shlex.split(command)
     assert argv[0] == "trailhead"
