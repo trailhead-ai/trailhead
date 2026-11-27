@@ -119,7 +119,7 @@ surfaces it.
 A repo whose change touches an eval case mapped `merge_only` merges only with a current merge-tier eval-gate
 state: `portage merge ... --eval-state <repo_path>=<state_dir>` (repeatable). The state comes from
 `portage eval-gate plan --repo <repo> --tier merge`, one `portage eval-gate run` per planned case, and a
-passing `portage eval-gate verdict`; its head must be the PR's current head. Without it `portage merge`
+passing `portage eval-gate verdict`, all run from a host terminal (a sandboxed session's `plan` or `run` exits 3 with `eval-gate: sandboxed` and the monitor stops without merging); its head must be the PR's current head. Without it `portage merge`
 exits 2 before any merge, with `portage merge: eval-gate check failed for <repo>: <check> — <detail>` and
 the commands to run, whatever `--operator-directed` says. The merge is then pinned to the verified head, so
 a push after the check makes `gh pr merge` refuse. A repo whose change touches no `merge_only` case merges as

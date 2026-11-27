@@ -1171,9 +1171,10 @@ class TestLocalBackendFromInsideTheSandbox:
         os.kill(ws.worker_pid(request_id), signal.SIGKILL)
         return request_id
 
-    def test_a_request_started_with_the_sandbox_marker_whose_worker_is_gone_is_could_not_leave_sandbox(
+    def test_a_request_started_where_the_detector_sees_a_sandbox_whose_worker_is_gone_is_could_not_leave_sandbox(
             self, ws, monkeypatch):
-        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        _in_sandbox(ws, monkeypatch)
+        monkeypatch.delenv("SANDBOX_RUNTIME", raising=False)
         request_id = self._killed(ws)
         rc, out, _ = ws.wait(request_id, seconds=30)
         assert rc == 3
@@ -1181,7 +1182,10 @@ class TestLocalBackendFromInsideTheSandbox:
         assert out.count("next step: stop and report") == 2
         assert "interrupted" not in out and "resubmit" not in out
 
-    def test_a_request_started_without_the_marker_whose_worker_is_gone_is_still_interrupted(self, ws):
+    def test_a_request_started_where_the_detector_sees_no_sandbox_whose_worker_is_gone_is_interrupted_even_with_the_marker(
+            self, ws, monkeypatch):
+        _outside_sandbox(ws, monkeypatch)
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
         request_id = self._killed(ws)
         rc, out, _ = ws.wait(request_id, seconds=30)
         assert rc == 3

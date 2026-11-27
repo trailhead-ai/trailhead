@@ -17,18 +17,19 @@ a runner whose versioned file is replaced by an update keeps working. Both the l
 target (executable file, owner, not group- or world-writable) are checked. When it
 does not resolve, install and update print a warning (`portage-eval was not built`) and build no shim. The shim
 runs the command from a clean environment, passing through only `HOME`, the state-directory variables, the
-sandbox marker `SANDBOX_RUNTIME`, `USER`, `TERM`, and the locale variables; it fixes `PORTAGE_EVAL_RUNNER`
+`USER`, `TERM`, and the locale variables; it fixes `PORTAGE_EVAL_RUNNER`
 and `PORTAGE_EVAL_SHIM` (its own path), and never passes `XDG_CACHE_HOME`.
 
 ### Backend choice
 
-With no `--backend`, `start` looks at `SANDBOX_RUNTIME`, which the harness sets in sandboxed calls only. When it
-is set, nothing starts: the case is not run `could-not-leave-sandbox`, `start` exits 3, and after the not-run
+Eval runs from a host terminal. With no `--backend`, `start` asks the sandbox detector
+(`portage.eval_gate.sandbox.is_sandboxed`), which reads what the sandbox does to Outpost's credential folders and
+never an environment variable or argument. When it sees a sandbox, nothing starts: the case is not run `could-not-leave-sandbox`, `start` exits 3, and after the not-run
 block it prints one of:
 
-- the paste-ready command to run outside the sandbox, with the shim by absolute path and the plugin, cases and
+- the paste-ready command to run from a host terminal, with the shim by absolute path and the plugin, cases and
   `--repo` (made absolute) you passed:
-  `run outside the sandbox: <home>/.local/state/trailhead/bin/portage-eval start --plugin <root> --case <name> ...`
+  `run from a host terminal: <home>/.local/state/trailhead/bin/portage-eval start --plugin <root> --case <name> ...`
 - when the shim is not installed (absent or not executable): `the pinned portage-eval shim is not installed on
   this host ...; run trailhead update with claude on PATH, then chezmoi apply and start a new session`.
 - when this call already went through the shim (`PORTAGE_EVAL_SHIM` is set) and still ran sandboxed, a
@@ -37,7 +38,7 @@ block it prints one of:
 
 A session does not pass `--backend local`: from inside the sandbox it would start a worker the sandbox kills when
 the call returns, and `wait` then reports the unfinished cases not run `could-not-leave-sandbox` (stop and
-report, exit 3) because `request.json` records that the request started with the marker set. `--backend local`
+report, exit 3) because `request.json` records that the detector saw a sandbox when the request started. `--backend local`
 is for a caller that is not sandboxed (the shim, a terminal), where it is also the default. The worker never
 inherits `SANDBOX_RUNTIME` or `XDG_CACHE_HOME`.
 
@@ -109,7 +110,7 @@ below.
 
 | Reason | Cause | Next step |
 |--------|-------|-----------|
-| `could-not-leave-sandbox` | `start` ran sandboxed with no `--backend` (no request exists; printed by `start`), then the command to run outside the sandbox (above) | stop and report |
+| `could-not-leave-sandbox` | `start` ran sandboxed with no `--backend` (no request exists; printed by `start`), then the command to run from a host terminal (above) | stop and report |
 | `could-not-leave-sandbox` | `wait` found the worker gone with no result for a request started with the sandbox marker set (`--backend local` from inside the sandbox) | stop and report |
 | `runner-broken` | the sandbox-write canary did not pass or could not run, the runner temp base is under `/tmp` or the temp path is over 51 characters, the request could not be created or started, or the worker crashed | stop and report |
 | `runner-broken`, canary reason `runner-missing` | the pinned runner binary is gone, so the canary could not run; a `cause:` line adds that `claude` must be on PATH and `trailhead update` run | stop and report |

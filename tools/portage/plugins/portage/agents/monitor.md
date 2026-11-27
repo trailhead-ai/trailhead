@@ -240,7 +240,11 @@ change touches no `merge_only` or `split_procedure` case skips it and behaves as
      where the plan cannot tell), or no `merge_only` or `split_procedure` entry: no gate for this repo. Go straight on to
      its `portage merge` pair with no `--eval-state`; `portage merge` makes the same decision from
      the repo itself and refuses when the gate was needed.
-   - `plan` exits non-zero: it is a fault, not a verdict. Do not guess at one: treat the repo as
+   - `plan` exits 3 with first line `eval-gate: sandboxed`: this session runs inside the sandbox, where the
+     eval gate cannot run. That is a stop, not a fault: gate no further repo, merge nothing, and report
+     `BLOCKED eval-gate-not-run` saying the merge-tier gate must be run from a terminal on this host
+     (outside any Claude Code session); never try another way past it.
+   - `plan` exits non-zero otherwise: it is a fault, not a verdict. Do not guess at one: treat the repo as
      having no gate, say in the report that `plan` failed and give its one-line error, and rely on
      `portage merge`'s own refusal.
 
@@ -262,7 +266,9 @@ change touches no `merge_only` or `split_procedure` case skips it and behaves as
 
    `<verdict>` is the verdict the call printed (`pass`, `fail` or `not-run`; the real CLI prints it as
    a `verdict:` line); a non-zero exit that printed none is `not-run`. A non-zero exit means no result was recorded for that case:
-   go on to the next case, and still run `verdict` at the end.
+   go on to the next case, and still run `verdict` at the end. The exception is exit 3 with first line
+   `eval-gate: sandboxed`: the session is sandboxed, so stop as in step 1 (run no further case, merge nothing,
+   report `BLOCKED eval-gate-not-run`, tell the operator to run the gate from a host terminal).
 
 3. **Verdict.**
 

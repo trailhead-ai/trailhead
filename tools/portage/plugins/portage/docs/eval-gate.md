@@ -121,6 +121,11 @@ by content (see "Cost and limits"), so a case already passed on the same content
 
 ## Running a case
 
+Eval runs from a host terminal, never from a session: the sandbox hides Outpost's credentials from eval. `plan`
+and `run` called from a sandboxed session print `eval-gate: sandboxed` and exit 3 without running anything;
+the sandbox is detected from what it does to Outpost's credential folders, never from an environment variable
+or argument. A session stops and tells the operator to run the same command from a terminal.
+
 `portage eval-gate run --state <dir> --case <name>` runs one planned case in the foreground (up to 540 s per
 call, counting every batch, so give the tool call a 600000 ms timeout) and records a verdict in the state directory:
 
@@ -236,6 +241,8 @@ operator whether to add a mark.
 
 Cases mapped `merge_only` do not run on push; they run at the merge tier, and `portage merge` will not merge
 a change that touches one, or a split-procedure case, without a current verdict.
+
+Run these from a host terminal; from a sandboxed session each exits 3 with `eval-gate: sandboxed`.
 
 1. `portage eval-gate plan --repo <repo> --tier merge` selects every touched case, `merge_only` included, and
    records the tier, the repo and `HEAD` in `plan.json`.

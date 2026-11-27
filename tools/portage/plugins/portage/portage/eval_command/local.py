@@ -25,8 +25,8 @@ also takes down the runner's process group, as the core's executor does on any e
 
 ``wait`` polls until ``result.json`` is a whole, valid file or the bound passes. A worker that is gone
 with no valid ``result.json`` leaves its unfinished cases ``interrupted`` (exit 3, never 4), or
-``could-not-leave-sandbox`` when ``request.json`` records that the request was started with the sandbox
-marker set: the sandbox kills a worker started from inside it when the call returns. The
+``could-not-leave-sandbox`` when ``request.json`` records that the sandbox detector saw a sandbox
+when the request was started: the sandbox kills a worker started from inside it when the call returns. The
 runner binary is validated by the gate's own ``PORTAGE_EVAL_RUNNER`` rules.
 """
 
@@ -45,6 +45,7 @@ import trailhead
 
 from portage.eval_core.run import RUNNER_MISSING, read_json
 from portage.eval_core import TmpBaseRefused, TmpPathTooLong, decide_case, execute, run_canary
+from portage.eval_gate import sandbox as gate_sandbox
 from portage.eval_gate.run import _pin, _runner_override
 
 from . import request as req
@@ -94,7 +95,7 @@ def start_request(*, repo: str, plugin_root: str, cases: list[dict]) -> str:
     try:
         request_id, path = req.create_request(
             {"repo": repo, "plugin_root": plugin_root, "cases": cases,
-             "started_in_sandbox": "SANDBOX_RUNTIME" in os.environ})
+             "started_in_sandbox": gate_sandbox.is_sandboxed()})
         log = open(path / "worker.log", "ab")
         lock = _take_lock(path)
         try:
