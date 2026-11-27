@@ -229,7 +229,8 @@ def _set_order(lists: Lists, p: argparse.Namespace) -> Result:
         by_key = {e.key: e for e in lists[g.vault].entries}
         out[g.vault] = DocketList(tuple(by_key[k] for k in g.now))
         for i, (kind, slug) in enumerate(g.now):
-            entries.append({"ref": f"{g.vault}/{kind}/{slug}", "status": "in-place" if g.was[i] == (kind, slug) else "moved"})
+            status = "in-place" if g.was[i] == (kind, slug) else "moved"
+            entries.append({"ref": f"{g.vault}/{kind}/{slug}", "status": status})
         expect.append(pipeline.Expectation(g.vault, present=g.now, order=g.now))
     return out, entries, expect
 

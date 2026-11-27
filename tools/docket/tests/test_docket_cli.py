@@ -24,7 +24,8 @@ class TestHelp:
     def test_bare_invocation_runs_the_report_command(self, monkeypatch, capsys, argv):
         from docket import cli
 
-        monkeypatch.setitem(cli.COMMANDS, "report", cli.Command("r", lambda p: None, lambda args: print("report ran") or 0))
+        report = cli.Command("r", lambda p: None, lambda args: print("report ran") or 0)
+        monkeypatch.setitem(cli.COMMANDS, "report", report)
         assert cli.main(argv) == 0
         assert capsys.readouterr().out == "report ran\n"
 

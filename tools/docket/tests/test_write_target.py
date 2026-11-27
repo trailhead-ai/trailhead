@@ -11,9 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from trailhead.tests._git_support import hermetic_git_env  # noqa: F401  (fixture)
-
-from test_changes import env, ref  # noqa: F401  (env is a fixture)
+from test_changes import ref
 
 
 def _files(root):

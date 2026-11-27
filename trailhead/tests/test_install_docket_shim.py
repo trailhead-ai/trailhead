@@ -27,7 +27,8 @@ def _install(tmp_path: Path, toml: str) -> dict[str, str]:
     return env
 
 
-def test_install_docket_cli_true_builds_a_shim_that_runs_the_tool(tmp_path):  # inert-gate: allow seam smoke: install -> shim -> docket CLI wiring has no input to vary
+# inert-gate: allow seam smoke: install -> shim -> docket CLI wiring has no input to vary
+def test_install_docket_cli_true_builds_a_shim_that_runs_the_tool(tmp_path):
     env = _install(tmp_path, "install_docket_cli = true\nplugins = []\n")
     shim = resolve_shim_dir(env=env) / "docket"
     proc = subprocess.run([str(shim), "--help"], capture_output=True, text=True, env=env, timeout=60)

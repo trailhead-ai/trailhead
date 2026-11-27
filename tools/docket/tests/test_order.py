@@ -13,7 +13,7 @@ import os
 import pytest
 
 from _docket_cli import PLUGIN_ROOT  # noqa: F401  (puts the plugin on sys.path)
-from test_changes import DEFAULT, env, hermetic_git_env, ref  # noqa: F401  (fixtures and helpers)
+from test_changes import DEFAULT, ref
 
 from docket.store import LockTimeoutError, Store, resolve_order
 

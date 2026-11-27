@@ -148,7 +148,12 @@ def _over_cap():
 
 
 REFUSALS = [
-    ("conflict-markers", "<<<<<<< HEAD\n" + doc() + "\n=======\n" + doc() + "\n>>>>>>> origin\n", S.ConflictedFileError, "resolve"),
+    (
+        "conflict-markers",
+        "<<<<<<< HEAD\n" + doc() + "\n=======\n" + doc() + "\n>>>>>>> origin\n",
+        S.ConflictedFileError,
+        "resolve",
+    ),
     ("invalid-json", "{not json", S.UnreadableListError, "JSON"),
     ("not-utf8", b"\xff\xfe{}", S.UnreadableListError, "UTF-8"),
     ("duplicate-key", '{"version": 1, "version": 1, "entries": []}', S.UnreadableListError, "duplicate"),
@@ -158,7 +163,12 @@ REFUSALS = [
     ("over-cap", _over_cap(), S.UnreadableListError, "256 KiB"),
     ("unknown-key", json.dumps({"version": 1, "entries": [], "extra": 1}), S.UnreadableListError, "extra"),
     ("unknown-entry-key", doc([{**ent(), "title": "x"}]), S.UnreadableListError, "title"),
-    ("unknown-workspace-key", doc([{**ent(), "workspace": {"group": "g", "slug": "s", "host": "h"}}]), S.UnreadableListError, "host"),
+    (
+        "unknown-workspace-key",
+        doc([{**ent(), "workspace": {"group": "g", "slug": "s", "host": "h"}}]),
+        S.UnreadableListError,
+        "host",
+    ),
     ("missing-entries", json.dumps({"version": 1}), S.UnreadableListError, "entries"),
     ("version-zero", doc(version=0), S.UnreadableListError, "version"),
     ("version-string", doc(version="1"), S.UnreadableListError, "version"),
@@ -169,7 +179,12 @@ REFUSALS = [
     ("unsafe-slug-traversal", doc([ent("../x")]), S.UnreadableListError, "slug"),
     ("unsafe-slug-newline", doc([ent("a\nb")]), S.UnreadableListError, "slug"),
     ("unsafe-kind", doc([ent("a", "Task/x")]), S.UnreadableListError, "kind"),
-    ("unsafe-workspace", doc([{**ent(), "workspace": {"group": "-g", "slug": "s"}}]), S.UnreadableListError, "workspace"),
+    (
+        "unsafe-workspace",
+        doc([{**ent(), "workspace": {"group": "-g", "slug": "s"}}]),
+        S.UnreadableListError,
+        "workspace",
+    ),
     ("entry-not-object", doc(["task/a"]), S.UnreadableListError, "entry"),
 ]
 
@@ -184,7 +199,9 @@ class TestRefusals:
         assert fragment.lower() in str(info.value).lower()
 
     @pytest.mark.parametrize("label,payload,exc,fragment", REFUSALS, ids=[r[0] for r in REFUSALS])
-    def test_an_update_over_an_unreadable_list_refuses_and_leaves_the_bytes(self, store, vault, label, payload, exc, fragment):
+    def test_an_update_over_an_unreadable_list_refuses_and_leaves_the_bytes(
+        self, store, vault, label, payload, exc, fragment
+    ):
         put(vault, payload)
         before = snapshot(vault / "sites")
         with pytest.raises(exc):

@@ -28,8 +28,9 @@ The lock is an flock on `.git/docket/lock`, polled with LOCK_NB until a deadline
 refused with a named error. It is host-local; across hosts, sync settles conflicts.
 
 Confinement: no API takes a path, and docket reads no environment variable to choose the vault (the default
-vault is whatever `lore vault ls` reports; lore resolves that from its own configuration). Write targets are only `lists/<validated vault name>.json` and
-`vault-order.json`, and every name and entry value is validated before it reaches a path or a file.
+vault is whatever `lore vault ls` reports; lore resolves that from its own configuration). Write targets
+are only `lists/<validated vault name>.json` and `vault-order.json`, and every name and entry value is
+validated before it reaches a path or a file.
 """
 from __future__ import annotations
 
@@ -321,7 +322,9 @@ class Store:
 
     def _dir_refusal(self, refusal: type[StoreError], part: str, exc: OSError) -> StoreError:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
-            return refusal(f"{self.vault_root}/.../{part} is not a real directory (a symlink or a file); refusing to use it")
+            return refusal(
+                f"{self.vault_root}/.../{part} is not a real directory (a symlink or a file); refusing to use it"
+            )
         return refusal(f"cannot open or create {part} in {self.vault_root}: {exc.strerror}")
 
     @contextmanager

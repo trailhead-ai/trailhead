@@ -394,7 +394,8 @@ class TestRealLore:
         (vault / "task").mkdir()
         cfg = tmp_path / "config" / "lore"
         cfg.mkdir(parents=True)
-        (cfg / "config.json").write_text(json.dumps({"vaults": [{"name": "proj", "scope": "default", "path": str(vault)}]}))
+        vaults = {"vaults": [{"name": "proj", "scope": "default", "path": str(vault)}]}
+        (cfg / "config.json").write_text(json.dumps(vaults))
         lore_env = dict(os.environ, HOME=str(tmp_path / "home"), XDG_STATE_HOME=str(tmp_path / "state"),
                         XDG_CONFIG_HOME=str(tmp_path / "config"), LORE_PUBLISH_DISABLE="1")
 
