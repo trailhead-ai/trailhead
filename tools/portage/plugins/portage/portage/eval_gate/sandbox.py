@@ -11,6 +11,9 @@ On Linux the sandbox mounts a tmpfs over each of Outpost's read-denied folders (
 On macOS the sandbox refuses the read, so listing an existing folder raises `PermissionError`. A host
 terminal sees neither.
 
+A home behind a symlink (/home -> /var/home) is mounted over at its resolved path, so each folder is matched at both its
+raw and its resolved path.
+
 `MOUNTINFO` is the Linux file read and `account_home` the home lookup; a test points each at a fabricated one.
 """
 
@@ -87,4 +90,5 @@ def is_sandboxed() -> bool:
     folders = [root / name for name in FOLDERS]
     if not any(_exists(f) for f in folders):
         return True
-    return _masked({str(p) for p in folders}) or _refused(folders)
+    probed = {str(p) for p in folders} | {os.path.realpath(p) for p in folders}
+    return _masked(probed) or _refused(folders)

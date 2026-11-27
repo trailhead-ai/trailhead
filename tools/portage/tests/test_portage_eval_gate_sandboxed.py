@@ -93,6 +93,39 @@ def test_the_marker_variable_a_session_controls_does_not_change_the_answer(home,
     assert sandbox.is_sandboxed() is True
 
 
+@pytest.fixture
+def symlinked_home(tmp_path, monkeypatch):
+    """An account home reached through a symlink (/home -> /var/home): the password database names the link."""
+    real = tmp_path / "var" / "home" / "u"
+    (real / ".local" / "state" / "outpost" / "db").mkdir(parents=True)
+    (tmp_path / "home").symlink_to(tmp_path / "var" / "home")
+    reached = tmp_path / "home" / "u"
+    monkeypatch.setenv("HOME", str(reached))
+    monkeypatch.setattr(sandbox, "account_home", lambda: reached)
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+    return reached, real
+
+
+def test_a_mask_listed_at_the_resolved_path_of_a_symlinked_home_reads_as_sandboxed(
+    symlinked_home, tmp_path, monkeypatch
+):
+    reached, real = symlinked_home
+    _mountinfo(tmp_path, monkeypatch, (_outpost(real, "db"), "tmpfs"))
+    assert sandbox.is_sandboxed() is True
+
+
+def test_a_mask_listed_at_the_raw_path_of_a_symlinked_home_reads_as_sandboxed(symlinked_home, tmp_path, monkeypatch):
+    reached, real = symlinked_home
+    _mountinfo(tmp_path, monkeypatch, (_outpost(reached, "db"), "tmpfs"))
+    assert sandbox.is_sandboxed() is True
+
+
+def test_a_symlinked_home_with_no_mask_reads_as_not_sandboxed(symlinked_home, tmp_path, monkeypatch):
+    reached, real = symlinked_home
+    _mountinfo(tmp_path, monkeypatch, (_outpost(real, "db"), "xfs"), (str(real / "elsewhere"), "tmpfs"))
+    assert sandbox.is_sandboxed() is False
+
+
 def _env_folders(tmp_path: Path) -> Path:
     elsewhere = tmp_path / "elsewhere"
     for name in FOLDERS:
