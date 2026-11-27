@@ -198,7 +198,7 @@ def make_command(runner: Runner | None = None, **options: Any) -> Any:
     def run(args: argparse.Namespace) -> int:
         report = build_report(runner or _timed_runner(LOOKUP_TIMEOUT_SECONDS),
                               runner or _timed_runner(CAMP_TIMEOUT_SECONDS),
-                              workspace_state=getattr(args, "workspace_state", None), **options)
+                              workspace_state=args.workspace_state, **options)
         print(json.dumps(report, indent=2))
         return 0
 
