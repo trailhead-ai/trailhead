@@ -10,7 +10,8 @@
       "Bash(./camp *)",
       "Bash(mktemp)",
       "Bash(mktemp *)",
-      "Write"
+      "Write",
+      "Bash(rm -- *)"
     ],
     "max_cost_usd": 3
   },
@@ -72,6 +73,24 @@
       "merge_only": true
     },
     "an-add-that-leaves-more-than-25-live-entries-warns": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "a-thought-opening-with-a-hyphen-gets-a-title-that-does-not": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "a-description-that-derives-an-unsafe-slug-is-found-by-search": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "a-notes-temp-file-is-private-and-removed-before-it-is-listed": {
       "measures": [
         "skills/docket/SKILL.md"
       ],
