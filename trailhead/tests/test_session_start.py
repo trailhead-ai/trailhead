@@ -290,7 +290,7 @@ def test_hub_profile_within_the_users_write_list_launches_and_denies_nothing(tmp
     start = _start(env)
     fs = _settings_of(start)["sandbox"]["filesystem"]
     assert fs["allowWrite"] == list(_hub_roots(env))
-    assert fs["denyWrite"] == [*_protected(env), *_later_vault_globs(env)]
+    assert fs["denyWrite"] == [*_protected(env), *_planted_patterns(env)]
 
 
 def test_the_hubs_own_future_settings_are_denied_wherever_the_hub_home_is(tmp_path):
@@ -298,7 +298,7 @@ def test_the_hubs_own_future_settings_are_denied_wherever_the_hub_home_is(tmp_pa
     for env in (first, second):
         deny = _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"]
         home = _hub_roots(env)[0]
-        assert deny == [*_protected(env), *_later_vault_globs(env)]
+        assert deny == [*_protected(env), *_planted_patterns(env)]
         assert deny[:2] == [f"{home}/.claude", f"{home}/.mcp.json"]
     assert _protected(first) != _protected(second)
 
@@ -309,7 +309,7 @@ def test_user_writable_root_outside_the_hub_roots_is_derived_into_denywrite(tmp_
     extra = str(tmp_path.resolve() / "elsewhere")
     _write_user_settings(env, _user_sandbox(allowWrite=[".", cache, lore, extra]))
     fs = _settings_of(_start(env))["sandbox"]["filesystem"]
-    assert fs["denyWrite"] == [*_protected(env), extra, *_later_vault_globs(env)]
+    assert fs["denyWrite"] == [*_protected(env), extra, *_planted_patterns(env)]
     assert not set(fs["denyWrite"]) & set(fs["allowWrite"])
 
 
@@ -323,7 +323,7 @@ def test_user_write_entry_is_resolved_before_it_is_compared_to_a_hub_root(tmp_pa
         env, _user_sandbox(allowWrite=[".", str(alias / Path(cache).name), lore])
     )
     assert _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"] == [
-        *_protected(env), *_later_vault_globs(env)
+        *_protected(env), *_planted_patterns(env)
     ]
 
 
@@ -352,7 +352,7 @@ def test_user_write_entry_sharing_only_a_string_prefix_with_a_hub_root_is_not_an
     sibling = home + "-sibling"
     _write_user_settings(env, _user_sandbox(allowWrite=[".", cache, lore, sibling]))
     assert _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"] == [
-        *_protected(env), sibling, *_later_vault_globs(env)
+        *_protected(env), sibling, *_planted_patterns(env)
     ]
 
 
@@ -445,7 +445,7 @@ def test_with_no_other_user_sandbox_keys_the_profiles_own_narrowing_still_applie
         _write_user_settings(env, {**content, "sandbox": sandbox})
     fs = _settings_of(_start(env))["sandbox"]["filesystem"]
     assert fs["allowWrite"] == list(_hub_roots(env))
-    assert fs["denyWrite"] == [*_protected(env), *_later_vault_globs(env)]
+    assert fs["denyWrite"] == [*_protected(env), *_planted_patterns(env)]
 
 
 @pytest.mark.parametrize(
@@ -1040,7 +1040,15 @@ def _vault_denials(env) -> list[str]:
 
 
 def _later_vault_globs(env) -> list[str]:
-    return _admin(f"{_hub_roots(env)[1]}/*/*/.git")
+    return _admin(f"{_hub_roots(env)[1]}/**/.git")
+
+
+def _planted_patterns(env) -> list[str]:
+    return [
+        entry
+        for root in _hub_roots(env)
+        for entry in (f"{root}/**/.claude", *_admin(f"{root}/**/.git"))
+    ]
 
 
 def test_no_vaults_denies_only_the_glob_for_vaults_created_later(tmp_path):
@@ -1137,10 +1145,10 @@ def test_vault_denials_sit_alongside_the_lore_root_allow_write(tmp_path):
 
 def test_a_profile_without_a_guarded_root_denies_no_git_files(tmp_path):
     env = _fence(tmp_path)
-    _make_vault(_hub_roots(env)[1], "one")
+    one = _make_vault(_hub_roots(env)[1], "one")
     bare = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles)
     deny = _settings_of(_start(env, profile=bare))["sandbox"]["filesystem"]["denyWrite"]
-    assert not any("/.git" in d for d in deny)
+    assert not any(d.startswith(f"{one}/") for d in deny)
 
 
 def test_a_vault_nested_deeper_than_the_scan_bound_is_left_to_the_glob_only(tmp_path):
@@ -3477,3 +3485,94 @@ def test_a_ritual_launch_command_stays_the_same_size_however_many_vaults_it_deni
     session_dir = Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / "rit-1"
     assert Path(out["argv"][out["argv"].index("--settings") + 1]).parent == session_dir
     assert sum(len(a) + 1 for a in out["argv"]) < 2048
+
+
+# -- write guards also cover folders and vaults created after launch (F29) ----
+
+
+def _glob_regex(pattern: str):
+    out, i = "", 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out += "(?:.*/)?"
+            i += 3
+        elif pattern.startswith("**", i):
+            out += ".*"
+            i += 2
+        elif pattern[i] == "*":
+            out += "[^/]*"
+            i += 1
+        else:
+            out += re.escape(pattern[i])
+            i += 1
+    return re.compile(out)
+
+
+def _covered_by_pattern(denied: list[str], path: Path) -> bool:
+    """The guard tests' path matcher, extended to the globs a sandbox's denyWrite takes: an
+    entry covers the path it matches and everything under it."""
+    candidates = [str(path), *(str(p) for p in path.parents)]
+    return any(
+        (_glob_regex(d).fullmatch(c) if "*" in d else d == c) for d in denied for c in candidates
+    )
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_a_ritual_launch_denies_git_and_claude_folders_and_vaults_created_after_it_resolved(tmp_path, platform):
+    env, ws = _ritual_ready(tmp_path)
+    (before,) = _add_members(ws, ["before"])
+    resolved = _ritual_resolved(env, ws, platform=platform)
+    lore = Path(env["LORE_STATE_DIR"]).resolve()
+    after = ws / "after"
+    (after / "sub" / ".git" / "hooks").mkdir(parents=True)
+    (after / "sub" / ".claude").mkdir()
+    (lore / "vaults" / "fresh" / ".git" / "hooks").mkdir(parents=True)
+    (lore / "vaults" / "fresh" / ".claude").mkdir()
+    start = ClaudeCodeHarness().session_start(
+        resolved, ws, None, interactive=False, account=None, env=env, platform=platform,
+        session_dir=Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / "rit-1",
+    )
+    deny_write = _settings_of(start)["sandbox"]["filesystem"]["denyWrite"]
+    for planted in (
+        after / "sub" / ".git" / "hooks" / "pre-commit",
+        after / "sub" / ".git" / "config",
+        after / "sub" / ".claude" / "settings.json",
+        ws / "brand-new" / ".claude" / "settings.json",
+        lore / "vaults" / "fresh" / ".git" / "hooks" / "pre-commit",
+        lore / "vaults" / "fresh" / ".git" / "config",
+        lore / "vaults" / "fresh" / ".claude" / "settings.json",
+    ):
+        assert _covered_by_pattern(deny_write, planted), planted
+    assert str(before / ".git") in deny_write
+    for ordinary in (
+        after / "sub" / "app.py",
+        after / "sub" / ".git" / "index",
+        lore / "vaults" / "fresh" / ".git" / "index",
+        lore / "vaults" / "fresh" / ".git" / "objects" / "ab" / "cd",
+        lore / "vaults" / "work" / "record.md",
+    ):
+        assert not _covered_by_pattern(deny_write, ordinary), ordinary
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_a_hub_launch_denies_git_admin_and_claude_folders_created_after_it_resolved(tmp_path, platform):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _give_user_a_write_list(env)
+    resolved = _resolved(env)
+    Path(home).mkdir(parents=True, exist_ok=True)
+    (Path(lore) / "vaults" / "fresh" / ".git" / "hooks").mkdir(parents=True)
+    (Path(cache) / "tool" / ".claude").mkdir(parents=True)
+    start = ClaudeCodeHarness().session_start(
+        resolved, Path(home), None, interactive=True, account=None, env=env, platform=platform,
+        session_dir=Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / "s1",
+        broker=broker_launch("s1", env=env),
+    )
+    deny_write = _settings_of(start)["sandbox"]["filesystem"]["denyWrite"]
+    for planted in (
+        Path(lore) / "vaults" / "fresh" / ".git" / "hooks" / "pre-commit",
+        Path(cache) / "tool" / ".claude" / "settings.json",
+        Path(home) / "x" / "y" / "z" / ".git" / "config",
+    ):
+        assert _covered_by_pattern(deny_write, planted), planted
+    assert not _covered_by_pattern(deny_write, Path(lore) / "vaults" / "fresh" / ".git" / "index")

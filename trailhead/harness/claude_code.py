@@ -1530,10 +1530,8 @@ def _git_admin_denials(guarded: list[Path], writable: list[Path]) -> list[str]:
     linked worktree's common directory, which is where its ``config`` and ``hooks`` live.
     A git directory outside every *writable* root is not named: it is already unwritable.
 
-    Each guarded root also gets the glob ``<root>/*/*/.git/<name>`` for each name, the
-    shape of lore's ``vaults/<name>``, so a vault created after launch is covered without
-    being enumerated. Repositories deeper than the scan bound and created after launch are
-    not covered.
+    Only what exists when this runs is named; :func:`_planted_folder_patterns` adds the
+    globs for what is created after launch.
     """
     found: list[str] = []
 
@@ -1560,8 +1558,26 @@ def _git_admin_denials(guarded: list[Path], writable: list[Path]) -> list[str]:
                 if common is not None:
                     add_admin(common)
             dirnames[:] = [] if depth >= _GIT_SCAN_DEPTH else [d for d in dirnames if d != ".git"]
-        for name in _GIT_ADMIN_NAMES:
-            add(f"{root}/*/*/.git/{name}")
+    return found
+
+
+def _planted_folder_patterns(writable: list[Path]) -> list[str]:
+    """``denyWrite` glob entries for what a session could plant under a writable root after launch.
+
+    Under every writable root, at any depth: the ``.claude`` folder (harness settings, hooks and
+    skills the operator's tools later load) and the ``config``, ``hooks`` and ``info`` of a
+    ``.git`` folder (a planted filter or hook later runs unsandboxed). The rest of ``.git``
+    stays writable so a vault can still be committed to. Folders and vaults that exist when the
+    profile resolves are also named concretely (see :func:`_git_admin_denials`); a sandbox that
+    does not honour a glob falls back on that list, one that does covers what is created later.
+    A vault's record files are not covered: a glob cannot except the one vault the session was
+    given.
+    """
+    found: list[str] = []
+    for root in writable:
+        for entry in (f"{root}/**/.claude", *(f"{root}/**/.git/{n}" for n in _GIT_ADMIN_NAMES)):
+            if entry not in found:
+                found.append(entry)
     return found
 
 
@@ -2662,6 +2678,7 @@ class ClaudeCodeHarness(Harness):
                 [Path(os.path.realpath(profile.paths[r])) for r in profile.profile.git_guarded_roles],
                 roots,
             ),
+            *_planted_folder_patterns(roots),
         ]
         hosts = profile.profile.network_allowed_hosts
         readable = [Path(os.path.realpath(p)) for p in profile.readable]

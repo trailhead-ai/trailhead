@@ -43,6 +43,7 @@ import shlex
 import shutil
 import socket
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -55,6 +56,7 @@ import pytest
 
 from ._gateway_e2e_support import (
     CHECKS,
+    _out,
     ArgumentSampler,
     TokenRecorder,
     known_secrets,
@@ -320,6 +322,7 @@ def _denial_session(tmp_path_factory, label, *, kind, deny_read=True):
         rendezvous = meeting_folder(camp.w1)
         write_late_file_probe(rendezvous)
         actor = LateFileActor(outpost.state / "db", rendezvous)
+        (camp.w1 / ".claude").mkdir(exist_ok=True)
         (camp.w1 / READ_CONTROL).write_text(READ_CONTROL_TEXT)
         if kind == "hand":
             settings = render_sandbox_settings(
@@ -336,6 +339,10 @@ def _denial_session(tmp_path_factory, label, *, kind, deny_read=True):
             steps["eval_start"] = _eval_start_step(camp.w1, shim_bin / "portage-eval", outpost.state)
         if kind == "launched":
             steps["gateway_run_list"] = f"{gateway} run list"
+            steps["claude_folder_write_at_launch"] = f"echo '{{}}' > '{camp.w1}/.claude/settings.json' && echo wrote"
+            steps["claude_folder_write_after_launch"] = (
+                f"mkdir -p '{camp.w1}/later/.claude' && echo '{{}}' > '{camp.w1}/later/.claude/settings.json' && echo wrote"
+            )
         paths = read_tool_paths(outpost.state, other_key, camp.w1)
         session = run_claude_session(
             root,
@@ -428,6 +435,30 @@ def test_the_read_tool_reads_a_file_the_hand_started_settings_leave_alone(hand_s
 def test_an_outpost_launched_session_cannot_read_or_run_what_it_must_not_by_shell(check, launched_session):  # AC83
     facts, session, _ = launched_session
     check(facts, session)
+
+
+def test_an_outpost_launched_session_cannot_write_settings_under_a_claude_folder_that_existed_at_launch(
+    launched_session,
+):
+    _, session, _ = launched_session
+    out = _out(session, "claude_folder_write_at_launch")
+    assert out.startswith("Exit code") and "wrote" not in out, f"the write was not refused: {out!r}"
+
+
+@pytest.mark.skipif(
+    sys.platform.startswith("linux"),
+    reason=(
+        "the Linux sandbox expands its write denials once at launch, so a .claude folder made after launch is "
+        "writable there; closed by "
+        "task/on-linux-launched-sessions-cannot-write-git-or-claude-folders-or-vaults-created-after-launch"
+    ),
+)
+def test_an_outpost_launched_session_cannot_write_settings_under_a_claude_folder_created_after_launch(
+    launched_session,
+):
+    _, session, _ = launched_session
+    out = _out(session, "claude_folder_write_after_launch")
+    assert out.startswith("Exit code") and "wrote" not in out, f"the write was not refused: {out!r}"
 
 
 def test_an_outpost_launched_session_runs_the_gateway_shim_as_itself(launched_session):
