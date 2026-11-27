@@ -331,6 +331,11 @@ class TestCamp:
         assert doc["hosts_unanswered"] == [{"reason": word, "data": {"host": "h"}}]
         assert "IGNORE" not in json.dumps(doc)
 
+    def test_a_camp_row_with_no_host_name_is_reported_as_unnamed_host(self, env):
+        env.fake.camp = completed([], 0, json.dumps([{"ok": False, "reason": "unreachable"}]))
+        _, doc, _ = env.run()
+        assert doc["hosts_unanswered"] == [{"reason": "unreachable", "data": {"host": "unnamed host"}}]
+
     def test_camp_host_names_are_cleaned_and_appear_only_under_data(self, env):
         self._attach(env, "gamma")
         rows = [{"ok": True, "group": "grp", "slug": "gamma", "state": "running", "host": f"ev\nil{ZERO_WIDTH}host"},
@@ -471,6 +476,20 @@ class TestOutpostState:
         assert self._running_on(doc) == {"docket": ["ev ilhost"]}
         assert doc["hosts_unanswered"] == [{"reason": "did not answer", "data": {"host": "bad host"}}]
         assert "IGNORE" not in json.dumps(doc)
+
+    def test_a_host_repeated_in_the_gateway_unanswered_list_is_reported_once(self, env, tmp_path):
+        self._attach(env, "docket")
+        reply = {**GATEWAY["answered"], "unanswered": [
+            {"host": "laptop", "reason": "unreachable"}, {"host": "laptop", "reason": "unreachable"}]}
+        doc = self._run(env, tmp_path, reply)
+        assert doc["hosts_unanswered"] == [{"reason": "unreachable", "data": {"host": "laptop"}}]
+
+    @pytest.mark.parametrize("entry", [{"reason": "unreachable"}, {"host": 7, "reason": "unreachable"},
+                                       {"host": None, "reason": "unreachable"}, {"host": "", "reason": "unreachable"}])
+    def test_a_gateway_unanswered_entry_without_a_valid_host_name_is_reported_as_unnamed_host(self, env, tmp_path, entry):
+        self._attach(env, "docket")
+        doc = self._run(env, tmp_path, {**GATEWAY["answered"], "unanswered": [entry]})
+        assert doc["hosts_unanswered"] == [{"reason": "unreachable", "data": {"host": "unnamed host"}}]
 
 
 class TestFetchedAt:

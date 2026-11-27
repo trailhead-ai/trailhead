@@ -43,6 +43,7 @@ class CampState(NamedTuple):
 
 UNKNOWN = CampState(None, [])
 OUTPOST = "outpost"
+UNNAMED_HOST = "unnamed host"
 OUTPOST_SILENT = CampState(None, [Unanswered(OUTPOST, DID_NOT_ANSWER)])
 MAX_OUTPOST_BYTES = 256 * 1024
 MAX_OUTPOST_DEPTH = 6
@@ -68,6 +69,13 @@ def _array(stdout: str) -> list[Any] | None:
     return None
 
 
+def _add_unanswered(unanswered: list[Unanswered], host: Any, reason: str) -> None:
+    named = host if isinstance(host, str) and host.strip() else UNNAMED_HOST
+    entry = Unanswered(named, reason)
+    if entry not in unanswered:
+        unanswered.append(entry)
+
+
 def fetch(runner: Runner) -> CampState:
     try:
         proc = runner(CAMP_ARGV)
@@ -84,10 +92,7 @@ def fetch(runner: Runner) -> CampState:
         if not isinstance(row, dict):
             continue
         if row.get("ok") is False:
-            host = row.get("host")
-            entry = Unanswered(host if isinstance(host, str) else "", reason_word(row.get("reason")))
-            if entry not in unanswered:
-                unanswered.append(entry)
+            _add_unanswered(unanswered, row.get("host"), reason_word(row.get("reason")))
         else:
             rows.append(row)
     return CampState(rows, unanswered)
@@ -136,11 +141,8 @@ def from_outpost(path: str) -> CampState:
     for row in doc.get("unanswered", []):
         if not isinstance(row, dict):
             continue
-        host, reason = row.get("host"), row.get("reason")
-        word = reason if reason in REASON_WORDS else reason_word(reason)
-        entry = Unanswered(host if isinstance(host, str) else "", word)
-        if entry not in unanswered:
-            unanswered.append(entry)
+        reason = row.get("reason")
+        _add_unanswered(unanswered, row.get("host"), reason if reason in REASON_WORDS else reason_word(reason))
     return CampState(rows, unanswered, from_outpost=True)
 
 
