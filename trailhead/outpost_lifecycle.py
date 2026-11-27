@@ -125,6 +125,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from trailhead.gateway.private_file import Unsafe, read_private_file
 from trailhead.paths import PathResolutionError, config_dir, ensure_dir, state_dir
 
 APP = "outpost"
@@ -1022,13 +1023,19 @@ class _NoCodeRoute(Exception):
     """The daemon has no route that mints a one-time sign-in code."""
 
 
+def _operator_uid() -> int:
+    return os.geteuid()
+
+
 def _mint_open_code(env: dict[str, str] | None, timeout: float) -> str:
     """Read the operator credential and ask the daemon for a one-time code; :class:`_NoCodeRoute` when it has no
     such route (a daemon older than the sign-in code, which signs the browser in on its own; it answers 404, or
     403 ``human_action_requires_cookie`` where its cookie guard sits in front of the missing route)."""
     credential_file = state_dir(APP, env=env) / OPERATOR_DIR / CREDENTIAL_NAME
     try:
-        credential = credential_file.read_text().strip()
+        credential = read_private_file(credential_file, "operator credential", _operator_uid()).strip()
+    except Unsafe as exc:
+        raise OutpostLifecycleError(f"cannot read the operator credential ({exc})") from exc
     except OSError as exc:
         raise OutpostLifecycleError(
             f"cannot read the operator credential ({exc.strerror or exc}); "

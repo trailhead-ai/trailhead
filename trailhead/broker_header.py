@@ -10,11 +10,13 @@ with nothing on stdout and leaves one secret-free line in trailhead's state dire
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 from trailhead.gateway import outpost_http
+from trailhead.gateway.private_file import Unsafe, read_private_file
 from trailhead.launch_profile import InvalidBrokerSessionError, validate_broker_session
 from trailhead.paths import state_dir
 
@@ -33,12 +35,16 @@ class _Failure(Exception):
         self.message = message or category
 
 
+def _operator_uid() -> int:
+    return os.geteuid()
+
+
 def _read_credential(path: Path) -> tuple[str, str]:
     try:
-        text = path.read_text()
+        text = read_private_file(path, "broker credential", _operator_uid())
     except FileNotFoundError:
         raise _Failure("credential-missing") from None
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError, Unsafe):
         raise _Failure("credential-unreadable") from None
     try:
         data = json.loads(text)

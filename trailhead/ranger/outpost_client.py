@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 
 from trailhead.gateway import outpost_http
+from trailhead.gateway.private_file import Unsafe, read_private_file
 from trailhead.launch_profile import operator_token_store, validate_account
 from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT
 
@@ -57,11 +59,15 @@ def outpost_answering(port: int = DAEMON_PORT) -> bool:
     )
 
 
+def _operator_uid() -> int:
+    return os.geteuid()
+
+
 def read_operator_credential(env: dict[str, str]) -> str:
     path = operator_token_store(env=env) / "credential"
     try:
-        value = path.read_text().strip()
-    except OSError:
+        value = read_private_file(path, "operator credential", _operator_uid()).strip()
+    except (OSError, Unsafe):
         value = ""
     if not value:
         raise OutpostRefusal(

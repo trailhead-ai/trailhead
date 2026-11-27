@@ -118,6 +118,7 @@ def _credential(tmp_path, session="sess-1", body=None):
     d.mkdir(parents=True, exist_ok=True)
     f = d / "broker-client.json"
     f.write_text(body if body is not None else json.dumps({"client_id": CLIENT_ID, "client_secret": SECRET}))
+    f.chmod(0o600)
     return f
 
 

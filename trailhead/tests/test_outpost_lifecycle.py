@@ -1016,6 +1016,7 @@ def test_open_mints_its_code_over_outposts_socket_and_sends_nothing_to_tcp(outpo
     env = {**outpost.env, "OUTPOST_STATE_DIR": str(state)}
     (state / "operator").mkdir(parents=True)
     (state / "operator" / "credential").write_text(tcp_outpost.CREDENTIAL)
+    (state / "operator" / "credential").chmod(0o600)
     seen: list = []
     opener = _RecordingOpener()
 
