@@ -1,0 +1,15 @@
+#!__PYTHON__
+"""A stand-in for `outpost-gateway` in the docket eval runs: `docket workspaces` prints camp-state/gateway.json; every call is logged to camp-state/gateway-calls.log."""
+import os
+import sys
+
+here = os.path.dirname(os.path.abspath(__file__))
+state = os.path.join(here, "camp-state")
+args = sys.argv[1:]
+with open(os.path.join(state, "gateway-calls.log"), "a", encoding="utf-8") as log:
+    log.write(" ".join(args) + "\n")
+if args != ["docket", "workspaces"] or not os.path.exists(os.path.join(state, "gateway.json")):
+    print("outpost-gateway: unsupported call in the eval stand-in", file=sys.stderr)
+    sys.exit(2)
+with open(os.path.join(state, "gateway.json"), encoding="utf-8") as src:
+    sys.stdout.write(src.read())

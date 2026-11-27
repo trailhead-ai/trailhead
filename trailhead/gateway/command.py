@@ -13,7 +13,8 @@ characters before it reaches the terminal.
 ``run start`` uploads the working tree and prints the new run's id, and refuses a tree whose real top level is not
 inside the camp workspace the harness process works in; ``run watch`` follows
 a run's log; ``run view`` and ``run list`` show runs (``run view --log`` prints a run's whole
-log once, without following); ``run cancel`` asks Outpost to cancel a queued or running run.
+log once, without following); ``run cancel`` asks Outpost to cancel a queued or running run; ``docket workspaces`` prints, as JSON, where
+docket's workspaces run on every host, as Outpost last saw them.
 Exit codes: 0 done, 1 (``watch --exit-status`` only) the job ran and failed or the run was
 cancelled, 3 (``watch --exit-status`` only) the run did
 not execute, 2 anything else that went wrong, including every refusal from Outpost, an
@@ -465,6 +466,16 @@ def _run_start(job: str, workflow: str | None, port: int, scratch_home: Path | N
     return 0
 
 
+def _docket_workspaces(port: int) -> int:
+    reply = _Gateway(port).request("GET", "/gateway/docket/workspaces")
+    if reply.status != 200:
+        raise _refusal(reply)
+    if not isinstance(reply.body.get("available"), bool):
+        raise _fail(CANNOT_READ)
+    print(_clean(json.dumps(reply.body)))
+    return 0
+
+
 def _run_id(text: str) -> int:
     if not text.isdigit() or int(text) < 1:
         raise argparse.ArgumentTypeError(f"{text!r} is not a run id")
@@ -481,7 +492,8 @@ def _parser() -> argparse.ArgumentParser:
         "  run watch <id> [--exit-status]        follow a run's log (exit: 0 ok, 1 failed or cancelled, 3 not run)\n"
         "  run view <id> [--log]                 show a run, or print its whole log once\n"
         "  run cancel <id>                       cancel a queued or running run\n"
-        "  run list [--json]                     list the workspace's runs\n\n"
+        "  run list [--json]                     list the workspace's runs\n"
+        "  docket workspaces                     print where docket's workspaces run, as Outpost last saw them (JSON)\n\n"
         f"run it as: {shim} run list",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -506,10 +518,16 @@ def _parser() -> argparse.ArgumentParser:
     cancel.add_argument("id", type=_run_id)
     listing = run.add_parser("list", help="list the workspace's runs")
     listing.add_argument("--json", action="store_true", help="print JSON instead of a table")
+    docket = sub.add_parser("docket", help="the docket's view of workspaces on other hosts").add_subparsers(
+        dest="action", required=True
+    )
+    docket.add_parser("workspaces", help="print Outpost's cached workspace state as JSON")
     return parser
 
 
 def _dispatch(args: argparse.Namespace, port: int, scratch_home: Path | None) -> int:
+    if args.group == "docket":
+        return _docket_workspaces(port)
     if args.action == "start":
         return _run_start(args.job, args.workflow, port, scratch_home)
     if args.action == "watch":

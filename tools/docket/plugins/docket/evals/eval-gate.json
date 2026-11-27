@@ -8,6 +8,7 @@
       "Bash(./docket *)",
       "Bash(./lore *)",
       "Bash(./camp *)",
+      "Bash(./outpost-gateway docket workspaces)",
       "Bash(mktemp)",
       "Bash(mktemp *)",
       "Write",
@@ -55,6 +56,12 @@
       "merge_only": true
     },
     "unanswered-hosts-leave-workspace-state-unknown": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "a-session-that-cannot-run-camp-reads-host-state-from-outpost": {
       "measures": [
         "skills/docket/SKILL.md"
       ],

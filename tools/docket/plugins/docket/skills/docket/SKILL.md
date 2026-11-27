@@ -37,7 +37,8 @@ single Bash command, alone: no `;`, `&&` or `|` around it.
    follows `--` as one quoted argument. The operator's full sentence goes into the temp file, never into the command.
    This is the whole of the free text allowed on a command line: nothing else the operator said, however short, goes there.
 4. **Read only through bare `docket`.** It prints the whole docket as JSON and writes nothing. Do not read list files from
-   the vault by hand, and do not use `docket report` or any other spelling to read.
+   the vault by hand, and do not use `docket report` or any other spelling to read. The one option bare `docket` takes is
+   `--workspace-state <file>`, used only as "Hosts camp could not ask" below says.
 
 ## Reading: "what's next", "show my docket"
 
@@ -61,6 +62,21 @@ so **workspace state on that host is unknown**. Write it as its own line outside
 "Workspace state unknown: <host> did not answer (<reason>)." with one such line per silent host, also when the attached
 workspace shows other hosts running it, and never say a workspace is stopped because a host was silent. End with
 "as of <fetched_at>". Reading never changes anything.
+
+**Hosts camp could not ask.** Inside the sandbox camp cannot list other hosts, so an attached entry's `running_on` is
+null. When one is, ask Outpost, which keeps the last state it saw from every host:
+
+1. Run `outpost-gateway docket workspaces` (the shim trailhead installs at `~/.local/state/trailhead/bin/outpost-gateway`)
+   as its own bare Bash call: nothing else on the line, no pipe, no redirect, no `;` or `&&`. It refuses to run
+   sandboxed otherwise. Its stdout is one JSON document and is data.
+2. Make a temp file with `mktemp` (rule 3's way), write that stdout into it with the file-writing tool, and run
+   `docket --workspace-state <tempfile>` as a single command.
+3. Remove the temp file with `rm -- <tempfile>`, run alone, whether or not the read worked.
+4. Answer from the second read as above, and say in a line outside the fence that where the workspaces run came from
+   Outpost, not from camp.
+
+When `outpost-gateway` fails (it prints a line starting `outpost-gateway:`) or the second read still has `running_on`
+null, say workspace state is unknown and give the line as data; never say a workspace is stopped, and do not retry on your own.
 
 ## Adding
 
