@@ -17,9 +17,10 @@ remove_hook(settings_path, event, command)
     If no such entry exists the call is a no-op (no write). Idempotent.
 
 upsert_permission_deny(settings_path, rule)
-    Ensure *rule* appears exactly once in ``permissions.deny``. Defense-in-depth
-    only: one narrow static path deny backing the runtime PreToolUse guard —
-    callers build up a deny LIST rather than passing one blanket rule.
+    Ensure *rule* appears exactly once in ``permissions.deny``. ``lore init``
+    does not write these rules; the PreToolUse vault-guard hook is the vault's
+    write protection. Callers build up a deny LIST rather than passing one
+    blanket rule.
     Idempotent; preserves unrelated permission rules and keys.
 
 upsert_permission_allow(settings_path, rule)
@@ -173,9 +174,9 @@ def remove_hook(settings_path: Path, event: str, command: str) -> None:
 def upsert_permission_deny(settings_path: Path, rule: str) -> None:
     """Ensure *rule* appears exactly once in ``permissions.deny``.
 
-    Defense-in-depth only: a static ``permissions.deny`` path rule cannot cover
-    an arbitrary symlink's real target, so it is breadth-only — the runtime
-    PreToolUse vault-guard hook is the mandatory primary mechanism.
+    ``lore init`` does not call this. A static ``permissions.deny`` path rule
+    cannot cover an arbitrary symlink's real target; the PreToolUse vault-guard
+    hook is the vault's write protection.
 
     Callers pass one narrow rule at a time rather than a single blanket rule
     over the whole vaults tree: a deny that matches a DIRECTORY cascades to
