@@ -115,7 +115,7 @@ from trailhead.harness.base import (
     SessionTranscript,
 )
 from trailhead.paths import state_dir as _state_dir
-from trailhead.launch_profile import BROKER_SERVER, ROLE_OTHER_ACCOUNT_CONFIGS, ROLE_WORKSPACE
+from trailhead.launch_profile import BROKER_SERVER, ROLE_CACHE, ROLE_OTHER_ACCOUNT_CONFIGS, ROLE_WORKSPACE
 from trailhead.launch_profile import scratch_dirs as _scratch_dirs
 
 if TYPE_CHECKING:
@@ -1564,7 +1564,8 @@ def _git_admin_denials(guarded: list[Path], writable: list[Path]) -> list[str]:
 def _planted_folder_patterns(writable: list[Path]) -> list[str]:
     """``denyWrite` glob entries for what a session could plant under a writable root after launch.
 
-    Under every writable root, at any depth: the ``.claude`` folder (harness settings, hooks and
+    Under each root given (a profile's workspace, vault and hub-home roots, never its cache root, where
+    tools legitimately clone repositories), at any depth: the ``.claude`` folder (harness settings, hooks and
     skills the operator's tools later load) and the ``config``, ``hooks`` and ``info`` of a
     ``.git`` folder (a planted filter or hook later runs unsandboxed). The rest of ``.git``
     stays writable so a vault can still be committed to. Folders and vaults that exist when the
@@ -2678,7 +2679,13 @@ class ClaudeCodeHarness(Harness):
                 [Path(os.path.realpath(profile.paths[r])) for r in profile.profile.git_guarded_roles],
                 roots,
             ),
-            *_planted_folder_patterns(roots),
+            *_planted_folder_patterns(
+                [
+                    Path(os.path.realpath(profile.paths[r]))
+                    for r in profile.profile.writable_roles
+                    if r != ROLE_CACHE
+                ]
+            ),
         ]
         hosts = profile.profile.network_allowed_hosts
         readable = [Path(os.path.realpath(p)) for p in profile.readable]

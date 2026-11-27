@@ -28,6 +28,7 @@ from trailhead.launch_profile import (
     HUB_PROFILE,
     RITUAL_PROFILE,
     RITUAL_ROLE,
+    ROLE_CACHE,
     LaunchProfile,
     WorkspaceError,
     broker_launch,
@@ -1044,9 +1045,10 @@ def _later_vault_globs(env) -> list[str]:
 
 
 def _planted_patterns(env) -> list[str]:
+    home, lore, _cache = _hub_roots(env)
     return [
         entry
-        for root in _hub_roots(env)
+        for root in (home, lore)
         for entry in (f"{root}/**/.claude", *_admin(f"{root}/**/.git"))
     ]
 
@@ -3543,6 +3545,9 @@ def test_a_ritual_launch_denies_git_and_claude_folders_and_vaults_created_after_
         lore / "vaults" / "fresh" / ".claude" / "settings.json",
     ):
         assert _covered_by_pattern(deny_write, planted), planted
+    cache = Path(resolved.paths[ROLE_CACHE])
+    for cached in (cache / "clone" / ".git" / "hooks" / "pre-commit", cache / "clone" / ".claude" / "settings.json"):
+        assert not _covered_by_pattern(deny_write, cached), cached
     assert str(before / ".git") in deny_write
     for ordinary in (
         after / "sub" / "app.py",
@@ -3571,8 +3576,14 @@ def test_a_hub_launch_denies_git_admin_and_claude_folders_created_after_it_resol
     deny_write = _settings_of(start)["sandbox"]["filesystem"]["denyWrite"]
     for planted in (
         Path(lore) / "vaults" / "fresh" / ".git" / "hooks" / "pre-commit",
-        Path(cache) / "tool" / ".claude" / "settings.json",
         Path(home) / "x" / "y" / "z" / ".git" / "config",
+        Path(home) / "x" / ".claude" / "settings.json",
     ):
         assert _covered_by_pattern(deny_write, planted), planted
+    for cached in (
+        Path(cache) / "tool" / ".claude" / "settings.json",
+        Path(cache) / "clone" / ".git" / "hooks" / "pre-commit",
+        Path(cache) / "clone" / ".git" / "config",
+    ):
+        assert not _covered_by_pattern(deny_write, cached), cached
     assert not _covered_by_pattern(deny_write, Path(lore) / "vaults" / "fresh" / ".git" / "index")
