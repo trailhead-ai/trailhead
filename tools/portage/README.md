@@ -21,7 +21,7 @@ them all.)
 | `/portage:pull_request create` | Review, push, and open PRs for every active repo in the group, then watch CI |
 | `/portage:pull_request update` | Push new commits to existing PRs, then watch CI |
 | `/portage:pull_request monitor` | Watch CI on open PRs, triage failures, and merge when all are clean |
-| `/portage:pull_request merge` | Merge the open PRs in dependency order, then clean up branches |
+| `/portage:pull_request merge` | Merge the open PRs in dependency order, leaving each repo on its branch |
 
 Replaces the retired `/portage:open`, `/portage:update`, `/portage:monitor`, and
 `/portage:merge` skills — those four names are gone; use the verb form above.
