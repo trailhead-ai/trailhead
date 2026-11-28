@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from .env_ssh_stub import AttachRig, free_ports, port_is_free, wait_for
+from .env_ssh_stub import AttachRig, port_is_free, quiet_ports, wait_for
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -948,7 +948,7 @@ def _start(
 ):
     if root is not None:
         monkeypatch.setattr(attachment, "_package_root", lambda: str(root))
-    pairs = [(free_ports(1)[0], free_ports(1)[0])] if ports is None else ports
+    pairs = [tuple(quiet_ports(2))] if ports is None else ports
     tag = _tag()
     result = attachment.start_relay(pairs, tag, timeout=timeout)
     if isinstance(result, subprocess.Popen):
@@ -1040,8 +1040,8 @@ def test_start_relay_with_a_held_port_names_that_port_and_leaves_nothing_behind(
     holder.listen()
     try:
         held = holder.getsockname()[1]
-        free = free_ports(1)[0]
-        result, tag, _ = _start(relays, monkeypatch, ports=[(free, free_ports(1)[0]), (held, free_ports(1)[0])])
+        free, target, held_target = quiet_ports(3)
+        result, tag, _ = _start(relays, monkeypatch, ports=[(free, target), (held, held_target)])
         assert isinstance(result, str) and f"port {held}:" in result and "\n" not in result
         assert _mine(tag) == []
         assert port_is_free(free)
@@ -1063,7 +1063,7 @@ def test_start_relay_names_the_held_port_even_when_the_interpreter_printed_a_war
     holder.listen()
     try:
         held = holder.getsockname()[1]
-        result, tag, _ = _start(relays, monkeypatch, root=root, ports=[(held, free_ports(1)[0])])
+        result, tag, _ = _start(relays, monkeypatch, root=root, ports=[(held, quiet_ports(1)[0])])
         assert isinstance(result, str) and "\n" not in result
         assert re.match(rf"port {held}: ", result), result
         assert _mine(tag) == []
@@ -1157,7 +1157,7 @@ def test_start_relay_holds_no_descriptor_of_its_own_after_a_refusal(relays, monk
     holder.listen()
     try:
         before = _open_descriptors()
-        result, _, _ = _start(relays, monkeypatch, ports=[(holder.getsockname()[1], free_ports(1)[0])])
+        result, _, _ = _start(relays, monkeypatch, ports=[(holder.getsockname()[1], quiet_ports(1)[0])])
         assert isinstance(result, str)
         assert _open_descriptors() == before
     finally:
@@ -1188,7 +1188,7 @@ def test_an_interrupt_while_start_relay_cleans_up_after_the_relay_is_ready_ends_
             spawned.append(self)
 
     monkeypatch.setattr(attachment.subprocess, "Popen", InterruptingPopen)
-    pairs = [(free_ports(1)[0], free_ports(1)[0])]
+    pairs = [tuple(quiet_ports(2))]
     with pytest.raises(KeyboardInterrupt):
         attachment.start_relay(pairs, _tag(), timeout=15.0)
     (process,) = spawned
@@ -1248,7 +1248,7 @@ def test_a_relocatable_interpreter_reports_a_held_port_as_exactly_the_relays_own
     holder.listen()
     try:
         held = holder.getsockname()[1]
-        result, _, _ = _start(relays, monkeypatch, ports=[(held, free_ports(1)[0])])
+        result, _, _ = _start(relays, monkeypatch, ports=[(held, quiet_ports(1)[0])])
         assert result == f"port {held}: {os.strerror(errno.EADDRINUSE)}"
     finally:
         holder.close()
