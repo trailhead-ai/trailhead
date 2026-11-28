@@ -386,7 +386,7 @@ class TestNestedDocuments:
         assert (code, doc["outcome"]) == (2, "refused")
         assert "cannot be read" in doc["message"]
 
-    @pytest.mark.parametrize("text", [DEEP, DEEP_OBJECT])
+    @pytest.mark.parametrize("text", [DEEP, DEEP_OBJECT], ids=["deep-array", "deep-object"])
     def test_a_deeply_nested_vault_listing_is_a_docket_error_not_a_traceback(self, env, monkeypatch, text):
         _printing(env, monkeypatch, ["lore", "vault", "ls"], text)
         code, doc, err = env.run("add", "--", ref("task/n1"))
