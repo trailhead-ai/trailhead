@@ -23,7 +23,7 @@ OUTPOST="${OUTPOST:-$TRAILHEAD/../outpost}"
 BASE_OUTPOST=78c1effe
 BASE_TRAILHEAD=cef24f133
 WRAPPER=/usr/local/lib/outpost-runner/act-run
-TESTFILE=trailhead/tests/test_gateway_e2e_andromeda.py
+TESTFILE=trailhead/tests/test_gateway_e2e_cancel.py
 PYTEST_ARGS=(-n 0 -s -rf --tb=short "$TESTFILE" -k cancel_scenario)
 
 if ! grep -q 'setpriv --pdeathsig' "$WRAPPER" 2>/dev/null; then

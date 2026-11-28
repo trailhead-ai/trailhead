@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -45,6 +46,7 @@ from ._gateway_e2e_support import (
     denial_facts,
     denial_steps,
     dotfiles_checkout,
+    eval_start_step,
     launched_session_settings,
     meeting_folder,
     read_results,
@@ -496,3 +498,29 @@ def test_a_socket_probe_reports_the_status_and_body_the_gateway_answers(tmp_path
     assert '{"reason":"nope"}' in done.stdout and done.stdout.rstrip().endswith("http=401"), done.stdout
     assert seen and seen[0].startswith(b"POST /gateway/sessions HTTP/1.1\r\n"), seen
     assert b'{"pid":1,"start_time":1}' in seen[0], seen
+
+
+@pytest.mark.parametrize(
+    ("shim_body", "expected"),
+    [
+        ('echo could-not-leave-sandbox >&2\nexit 3\n', ["could-not-leave-sandbox", "start_exit=3", "scaffold_ran=no"]),
+        ('sh "$PWD/eval-plugin/scaffold.sh"\nexit 0\n', ["start_exit=0", "scaffold_ran=yes"]),
+    ],
+    ids=["refused", "scaffold-ran"],
+)
+def test_the_eval_start_step_is_one_simple_command_reporting_the_start_and_the_scaffold(tmp_path, shim_body, expected):
+    workspace, state = tmp_path / "w1", tmp_path / "state"
+    workspace.mkdir()
+    (state / "operator").mkdir(parents=True)
+    (state / "operator" / "credential").write_text("x\n")
+    shim = tmp_path / "bin" / "portage-eval"
+    shim.parent.mkdir()
+    shim.write_text("#!/bin/sh\n" + shim_body)
+    shim.chmod(0o755)
+    step = eval_start_step(workspace, shim, state)
+    words = shlex.split(step)
+    assert not [w for w in words if w in {"&&", "||", "|", ";"} or w.endswith(";")], step
+    ran = subprocess.run(["bash", "-c", step], cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    out = ran.stdout + ran.stderr
+    for line in expected:
+        assert line in out, out

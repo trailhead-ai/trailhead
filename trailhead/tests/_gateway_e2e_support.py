@@ -432,6 +432,40 @@ def write_socket_probe(folder: Path) -> Path:
     return probe
 
 
+def eval_start_step(workspace: Path, eval_shim: Path, state: Path) -> str:
+    """A scaffold that reads the operator credential and records that it ran, then `portage-eval start` aimed at its
+    plugin; the step prints the start's exit status and whether the scaffold ran. It is one simple command running a
+    script written beside *eval_shim*, since Claude Code holds a chained command for approval."""
+    plugin = workspace / "eval-plugin"
+    (plugin / "evals").mkdir(parents=True, exist_ok=True)
+    scaffold = plugin / "scaffold.sh"
+    scaffold.write_text(f'#!/bin/sh\ncat "{state}/operator/credential" > /dev/null && touch "{workspace}/eval-scaffold-ran"\n')
+    scaffold.chmod(0o755)
+    script = eval_shim.parent / "eval-start-step.sh"
+    script.write_text(
+        f'cd "{workspace}" || exit 1\n'
+        f"{shlex.quote(str(eval_shim))} start --require-version 2 --plugin eval-plugin --case c\n"
+        'echo "start_exit=$?"\n'
+        "sleep 2\n"
+        f'if [ -e "{workspace}/eval-scaffold-ran" ]; then echo scaffold_ran=yes; else echo scaffold_ran=no; fi\n'
+    )
+    return f"sh {shlex.quote(str(script))}"
+
+
+def gateway_call(gateway, *argv) -> str:
+    """The shell line that runs the gateway command *gateway* with *argv*."""
+    return shlex.join([str(gateway), *argv])
+
+
+def scan_leaks(outpost, recorder, sampler, host) -> list[str]:
+    """Every secret or token the scenario knows of that reached a process's arguments, a stored run log or a request
+    record Outpost wrote."""
+    watched = known_secrets(outpost, recorder.tokens)
+    return sampler.problems(watched) + secrets_in_text(
+        watched, {**outpost_request_records(outpost), **stored_run_logs(host.runs_folder)}
+    )
+
+
 def sandbox_steps(state: Path, other_port: int, gateway: Path, outpost_port: int) -> dict[str, str]:
     """The Bash commands the sandboxed session runs, one tool call each, exactly as written.
 
