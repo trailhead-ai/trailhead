@@ -11,7 +11,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import socket
 import subprocess
+import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -40,10 +44,12 @@ from ._gateway_e2e_support import (
     check_the_read_tool_is_denied,
     denial_facts,
     denial_steps,
+    dotfiles_checkout,
     launched_session_settings,
     meeting_folder,
     read_results,
     read_tool_paths,
+    sandbox_steps,
     write_late_file_probe,
     write_path_shadow,
 )
@@ -423,3 +429,70 @@ def test_the_before_the_first_call_check_fails_when_anything_is_registered(facts
 
 def test_the_before_the_first_call_check_passes_when_nothing_is_registered():
     check_nothing_is_registered_before_the_first_gateway_call(Facts([], []))
+
+
+def test_an_empty_listing_that_ends_the_probe_output_passes_on_linux():
+    """The session hands back a step's output without its final newline, so the listing line can be the last text."""
+    session = Session({"late_file": "late_file=refused:No such file or directory\nlisting="}, 0, Path("/dev/null"))
+    check_the_late_side_file_is_refused(DenialFacts({}, True), session, platform="linux")
+
+
+def _template(checkout: Path) -> Path:
+    template = checkout / "dot_claude" / "private_settings.json.tmpl"
+    template.parent.mkdir(parents=True)
+    template.write_text("{}")
+    return checkout
+
+
+def test_the_dotfiles_checkout_is_the_workspace_sibling_unless_one_is_named(tmp_path):
+    repo = tmp_path / "ws" / "trailhead"
+    sibling = _template(tmp_path / "ws" / "dotfiles")
+    home = tmp_path / "home"
+    _template(home / ".local/share/chezmoi")
+    assert dotfiles_checkout(env={"HOME": str(home)}, repo_root=repo) == sibling
+    named = _template(tmp_path / "named")
+    assert dotfiles_checkout(env={"HOME": str(home), "TRAILHEAD_GATEWAY_E2E_DOTFILES": str(named)}, repo_root=repo) == named
+
+
+def test_the_dotfiles_checkout_is_the_operators_chezmoi_source_outside_a_workspace(tmp_path):
+    home = tmp_path / "home"
+    chezmoi = _template(home / ".local/share/chezmoi")
+    assert dotfiles_checkout(env={"HOME": str(home)}, repo_root=tmp_path / "lone" / "trailhead") == chezmoi
+
+
+@pytest.mark.parametrize("step", ["command_route", "register_without_authority"])
+def test_a_socket_probe_with_nothing_to_reach_exits_nonzero_and_reports_no_http_status(tmp_path, step):
+    state = tmp_path / "state"
+    (state / "gateway").mkdir(parents=True)
+    command = sandbox_steps(state, 7001, tmp_path / "shims" / "outpost-gateway", 7000)[step]
+    done = subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=30)
+    assert done.returncode != 0, done.stdout
+    assert re.findall(r"http=(\d+)", done.stdout + done.stderr) == ["000"], done.stdout + done.stderr
+
+
+def test_a_socket_probe_reports_the_status_and_body_the_gateway_answers(tmp_path):
+    """Needs a unix socket, so like every socket test it runs from a host terminal, not a sandboxed session."""
+    state = Path(tempfile.mkdtemp(prefix="gw-probe-"))
+    try:
+        (state / "gateway").mkdir()
+        server = socket.socket(socket.AF_UNIX)
+        server.bind(str(state / "gateway" / "gateway.sock"))
+        server.listen(1)
+        seen: list[bytes] = []
+
+        def answer() -> None:
+            conn, _ = server.accept()
+            seen.append(conn.recv(65536))
+            conn.sendall(b'HTTP/1.1 401 Unauthorized\r\nContent-Length: 17\r\n\r\n{"reason":"nope"}')
+            conn.close()
+
+        threading.Thread(target=answer, daemon=True).start()
+        command = sandbox_steps(state, 7001, tmp_path / "shims" / "outpost-gateway", 7000)["register_without_authority"]
+        done = subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=30)
+        server.close()
+    finally:
+        shutil.rmtree(state, ignore_errors=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '{"reason":"nope"}' in done.stdout and done.stdout.rstrip().endswith("http=401"), done.stdout
+    assert seen and seen[0].startswith(b"POST /gateway/sessions HTTP/1.1\r\n"), seen
+    assert b'{"pid":1,"start_time":1}' in seen[0], seen

@@ -34,7 +34,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from unittest import mock
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -109,9 +109,22 @@ def trailhead_serves_gateway_socket(checkout: Path) -> bool:
     return client.is_file() and "def socket_path(" in client.read_text()
 
 
-def dotfiles_checkout() -> Path:
-    path = Path(os.environ.get("TRAILHEAD_GATEWAY_E2E_DOTFILES") or Path(os.environ["HOME"]) / ".local/share/chezmoi")
-    if not (path / "dot_claude" / "private_settings.json.tmpl").is_file():
+_SETTINGS_TEMPLATE = Path("dot_claude") / "private_settings.json.tmpl"
+
+
+def dotfiles_checkout(env: Mapping[str, str] | None = None, repo_root: Path = REPO_ROOT) -> Path:
+    """The dotfiles checkout whose settings template the sessions run under: ``TRAILHEAD_GATEWAY_E2E_DOTFILES``, else
+    the ``dotfiles`` sibling a camp workspace has (the branch under test), else the operator's chezmoi source."""
+    source: Mapping[str, str] = os.environ if env is None else env
+    named = source.get("TRAILHEAD_GATEWAY_E2E_DOTFILES")
+    sibling = repo_root.parent / "dotfiles"
+    if named:
+        path = Path(named)
+    elif (sibling / _SETTINGS_TEMPLATE).is_file():
+        path = sibling
+    else:
+        path = Path(source["HOME"]) / ".local/share/chezmoi"
+    if not (path / _SETTINGS_TEMPLATE).is_file():
         raise AssertionError(f"no dotfiles checkout at {path}; set TRAILHEAD_GATEWAY_E2E_DOTFILES")
     return path
 
@@ -121,6 +134,7 @@ class RealOutpost:
     port: int
     state: Path
     log: Path
+    camp_state: Path | None = None
 
     @property
     def db_path(self) -> Path:
@@ -228,7 +242,7 @@ def real_outpost(
             if time.monotonic() > deadline:
                 raise AssertionError(f"Outpost did not answer on {port} in 60s; log:\n{log.read_text()[-2000:]}")
             time.sleep(0.1)
-        yield RealOutpost(port, state, log)
+        yield RealOutpost(port, state, log, camp.state)
     finally:
         proc.terminate()
         try:
@@ -354,7 +368,8 @@ def install_shims(root: Path, outpost: RealOutpost, *, port: int | None = None) 
     trailhead checkout, with the state folders baked in (so Outpost's state is ``outpost.state``, as the real
     install bakes the operator's). The shims run the real gateway command and the real hook's registration
     step. Both reach Outpost on the gateway socket under the baked Outpost state folder, so nothing about them is
-    replaced; a ``TokenRecorder`` entered on that state folder sits in front of the socket they use.
+    replaced; a ``TokenRecorder`` entered on that state folder sits in front of the socket they use. Camp's state
+    folder is baked in too, so the command finds the session's workspace where this Outpost does.
 
     A trailhead checkout from before the socket has a fixed TCP port instead, so its shims are pinned to
     ``register_port_interpreter``, a stand-in that aims them at *port* (the recorder's, else Outpost's own).
@@ -364,6 +379,8 @@ def install_shims(root: Path, outpost: RealOutpost, *, port: int | None = None) 
         "OUTPOST_STATE_DIR": str(outpost.state),
         "HOME": str(root / "outpost-home"),
     }
+    if outpost.camp_state is not None:
+        env["CAMP_STATE_DIR"] = str(outpost.camp_state)
     checkout = trailhead_checkout()
     interpreter = (
         None
@@ -378,23 +395,61 @@ def install_shims(root: Path, outpost: RealOutpost, *, port: int | None = None) 
         )
 
 
+SOCKET_PROBE = """import socket, sys
+
+path, method, target = sys.argv[1:4]
+body = sys.argv[4].encode() if len(sys.argv) > 4 else b""
+request = (
+    f"{method} {target} HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n"
+    f"Content-Type: application/json\\r\\nContent-Length: {len(body)}\\r\\n\\r\\n"
+).encode() + body
+chunks = []
+try:
+    client = socket.socket(socket.AF_UNIX)
+    client.settimeout(10)
+    client.connect(path)
+    client.sendall(request)
+    while chunk := client.recv(65536):
+        chunks.append(chunk)
+except OSError as err:
+    print(err)
+    print("http=000")
+    sys.exit(7)
+head, _, payload = b"".join(chunks).partition(b"\\r\\n\\r\\n")
+fields = head.split(b" ", 2)
+print(payload.decode(errors="replace"))
+print("http=" + (fields[1].decode() if len(fields) > 1 else "000"))
+"""
+
+
+def write_socket_probe(folder: Path) -> Path:
+    """The gateway socket probe, written into *folder*: ``python3 <probe> <socket> <method> <path> [<body>]`` sends one
+    HTTP request and prints the body then ``http=<status>``; when it cannot reach the socket it prints the error
+    then ``http=000`` and exits 7, as curl does."""
+    folder.mkdir(parents=True, exist_ok=True)
+    probe = folder / "gateway_socket_probe.py"
+    probe.write_text(SOCKET_PROBE)
+    return probe
+
+
 def sandbox_steps(state: Path, other_port: int, gateway: Path, outpost_port: int) -> dict[str, str]:
     """The Bash commands the sandboxed session runs, one tool call each, exactly as written.
 
     None prints a credential: the credential read is redirected to /dev/null, so only its exit status
     and error reach the result, and no step echoes the proxy variable. Each is a single simple command:
-    a chained one would need an approval a ``-p`` run cannot give.
+    a chained one would need an approval a ``-p`` run cannot give. The gateway socket is probed with a Python
+    client written beside *gateway*, not ``curl --unix-socket``, which Claude Code always holds for approval, so it
+    would never reach the sandbox the check is about.
     """
     probe = 'curl -sS --max-time 10 --noproxy "" --proxy "$HTTP_PROXY" -w "\\nhttp=%{http_code}\\n"'
-    unix = f'curl -sS --max-time 10 --unix-socket "{state}/gateway/gateway.sock" -w "\\nhttp=%{{http_code}}\\n"'
-    post = "-X POST -H 'content-type: application/json' -d '{\"pid\":1,\"start_time\":1}'"
+    unix = f'python3 "{write_socket_probe(gateway.parent)}" "{state}/gateway/gateway.sock"'
     return {
         "credential_read": f'cat "{state}"/sessions/*/gateway-client.json > /dev/null',
         "run_list": f"{gateway} run list",
-        "command_route": f"{unix} http://localhost/gateway/runs",
+        "command_route": f"{unix} GET /gateway/runs",
         "tcp_command_route": f"{probe} http://127.0.0.1:{outpost_port}/gateway/runs",
         "other_loopback_port": f"{probe} http://127.0.0.1:{other_port}/",
-        "register_without_authority": f"{unix} {post} http://localhost/gateway/sessions",
+        "register_without_authority": f"{unix} POST /gateway/sessions '{{\"pid\":1,\"start_time\":1}}'",
     }
 
 
@@ -1749,7 +1804,7 @@ def check_the_late_side_file_is_refused(
     assert facts.late_file_created, "the late side file was never created, so a refusal proves nothing"
     out = _out(session, "late_file")
     assert "late_file=refused" in out and "late_file=readable" not in out, f"the late file was not refused: {out!r}"
-    listing = out.split("listing=", 1)[1].splitlines()[0] if "listing=" in out else None
+    listing = out.split("listing=", 1)[1].partition("\n")[0] if "listing=" in out else None
     assert listing is not None, f"the probe printed no listing line: {out!r}"
     bare = listing == "" and platform.startswith("linux")
     assert listing.startswith("refused") or bare, f"the database folder could be listed: {out!r}"
