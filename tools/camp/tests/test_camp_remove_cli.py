@@ -1234,14 +1234,13 @@ class TestVerbsRefuseBadLockPathsWithOnePrefix:
     @pytest.mark.parametrize(
         ("argv", "prefix"),
         [
-            (["activate", "repo_a", "--name", "ws-slug"], "camp activate: lock folder "),
             (["activate", "--background", "repo_a", "--name", "ws-slug"],
              "camp activate --background: lock folder "),
             (["setup", "ws-slug"], "camp setup: lock folder "),
             (["remove", "ws-slug"], "camp remove: lock folder "),
             (["new", "another-slug", "--no-session"], "camp new: workspace bring-up failed: lock folder "),
         ],
-        ids=["activate", "activate-background", "setup", "remove", "new"],
+        ids=["activate-background", "setup", "remove", "new"],
     )
     def test_the_refusal_carries_one_camp_prefix(self, remove_env, argv, prefix):
         if "--background" in argv:

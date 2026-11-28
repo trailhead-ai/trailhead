@@ -361,18 +361,12 @@ def _die(message: str, code: int = 1) -> NoReturn:
     sys.exit(code)
 
 
-def _without_camp_prefix(message: object) -> str:
-    """The message with its own leading `camp: ` dropped, for embedding in a line
-    that already carries the `camp <verb>:` prefix."""
-    text = str(message)
-    return text[len("camp: "):] if text.startswith("camp: ") else text
-
-
 def _verb_line(verb: str, message: object, *, detail: str = "") -> str:
     """One stderr line `camp <verb>: <detail><message>` with a single `camp`
-    prefix. *detail* is lead-in text that sits between the verb prefix and the
-    message, such as `workspace bring-up failed: `."""
-    return f"camp {verb}: {detail}{_without_camp_prefix(message)}"
+    prefix: the message's own leading `camp: ` is dropped. *detail* is lead-in
+    text that sits between the verb prefix and the message, such as
+    `workspace bring-up failed: `."""
+    return f"camp {verb}: {detail}{str(message).removeprefix('camp: ')}"
 
 
 def _no_worktree_error() -> NoReturn:

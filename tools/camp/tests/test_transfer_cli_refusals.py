@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from ._helpers import CLI_CAMP, init_git_repo, run_camp
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
@@ -188,15 +190,10 @@ def test_a_flag_belonging_to_another_phase_is_refused_not_ignored(
 # transfer-receive — a lock folder the host cannot use is a refusal, not a crash.
 # ---------------------------------------------------------------------------
 
-_CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
-
-
 @pytest.fixture()
 def receive_host(tmp_path: Path) -> dict:
     """A real camp group on disk, a declared self_name, and a regular file where
     the worktrees root's lock folder belongs."""
-    from tests._helpers import init_git_repo, run_camp
-
     config_dir = tmp_path / "camp-config"
     state_dir = tmp_path / "camp-state"
     (config_dir / "groups").mkdir(parents=True)
@@ -224,7 +221,7 @@ def test_transfer_receive_reports_an_unusable_lock_folder_as_one_clean_line(
     """Each phase reaches the workspace lock; a regular file where the lock folder
     belongs refuses on stderr with the verb's single prefix, never a traceback."""
     r = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "transfer-receive", *phase_args,
+        [sys.executable, str(CLI_CAMP), "transfer-receive", *phase_args,
          "--group", "rcvgroup", "--slug", "wsx"],
         capture_output=True, text=True, env=receive_host["env"],
     )
