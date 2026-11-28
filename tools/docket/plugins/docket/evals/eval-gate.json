@@ -103,6 +103,21 @@
         "skills/docket/SKILL.md"
       ],
       "merge_only": true
+    },
+    "asking-what-is-on-my-backlog-reaches-the-docket": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ]
+    },
+    "asking-to-add-to-my-backlog-reaches-the-docket": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ]
+    },
+    "looking-at-my-backlog-changes-nothing": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ]
     }
   }
 }
