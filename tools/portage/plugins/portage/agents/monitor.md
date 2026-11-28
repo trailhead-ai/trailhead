@@ -153,7 +153,7 @@ This check runs once per watch-loop launch, not per action — the config doesn'
 ## Watch loop
 
 **Do NOT enable `gh pr merge --auto`.** Merges go through the explicit `portage merge` step at the
-end so this loop stays in control of ordering and post-merge cleanup.
+end so this loop stays in control of ordering and of what follows the merge (the prs.json sidecar, the external tracker).
 
 Set `last_checked_at` = now (ISO-8601). Call `portage wait-for-actionable` — it blocks internally
 (polling every 30s) until something is actionable:
@@ -421,8 +421,6 @@ merge` refuses with exit 2 before any `gh` call — honor that exit code and sur
 
 `portage merge` exits nonzero on any partial-merge. The agent relies on that exit code, not JSON
 parsing, to detect failure.
-
-Then clean up per repo: `git -C <repo_path> checkout main && git -C <repo_path> pull`.
 
 Finally, update the prs.json sidecar at `<manifest_dir>/prs.json` to reflect the merged state.
 

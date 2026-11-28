@@ -9,4 +9,4 @@ Use the `portage:monitor` agent to watch my pull request. Pass it these inputs:
 - eval_gate: on
 - stop_at_ready: true
 
-The command-line tools here are local stand-ins in the working directory. Wherever the agent's instructions call for `portage`, run `./portage`; wherever they call for `gh`, run `./gh`; always in that relative form, from the working directory root, one command per call. Use `git -C <path>` for git. Run the agent in the foreground and wait for it. Use `2026-01-01T00:00:00Z` wherever the agent needs a starting timestamp. Reply with what the agent reported.
+The command-line tools here are local stand-ins in the working directory. Wherever the agent's instructions call for `portage`, run `./portage`; wherever they call for `gh`, run `./gh`; always in that relative form, from the working directory root. Use `git -C <path>` for git. Run the agent in the foreground and wait for it. Use `2026-01-01T00:00:00Z` wherever the agent needs a starting timestamp. Reply with what the agent reported.

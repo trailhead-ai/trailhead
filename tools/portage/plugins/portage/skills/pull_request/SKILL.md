@@ -514,7 +514,7 @@ mergeable, then merge in dependency order.
 
 **Implementation:** this verb dispatches the `monitor` subagent (Sonnet/medium),
 which runs the watch+fix+merge loop, the action table, blocker handling, and the
-merge/cleanup sequence.
+merge sequence.
 
 **This must be launched from the top-level session, never from inside another subagent.**
 Nested background agents lose their notification channel when the outer subagent returns,
@@ -682,14 +682,6 @@ Every camp group member is a peer — there is no privileged member.
    orchestrator that placed the hold lifts it.
 
 4. **Report results.** If any failed, surface the reason and suggest next steps.
-
-5. **Clean up** after all PRs merge:
-
-   ```bash
-   git -C <repo> checkout main && git -C <repo> pull
-   ```
-
-   for each merged repo.
 
 ### External tracker
 
