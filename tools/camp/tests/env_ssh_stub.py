@@ -69,6 +69,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import select
 import shutil
 import signal
@@ -305,6 +306,30 @@ def free_ports(count: int) -> list[int]:
     return ports
 
 
+def _ephemeral_low() -> int:
+    """First port the kernel hands out for bind-to-0 and outbound connects (IANA's 49152 where unreadable)."""
+    try:
+        return int(Path("/proc/sys/net/ipv4/ip_local_port_range").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 49152
+
+
+def quiet_ports(count: int) -> list[int]:
+    """*count* distinct bindable loopback ports below the ephemeral range.
+
+    ``free_ports`` answers from the ephemeral range, so another test worker's listener or outbound
+    connection can take the port before the code under test binds it. Ports below that range are only
+    ever taken by a choice, so a collision needs two workers to draw the same one.
+    """
+    low, high = 10240, _ephemeral_low() - 1
+    chosen: list[int] = []
+    while len(chosen) < count:
+        port = random.randint(low, high)
+        if port not in chosen and port_is_free(port):
+            chosen.append(port)
+    return chosen
+
+
 class Upstream:
     """A fake service: answers every connection with its label, then closes."""
 
@@ -443,7 +468,7 @@ class AttachRig:
         """An environment with *count* ports, each carried to a fake upstream answering ``<name>-<i>``."""
         upstreams = [Upstream(f"{name}-{i}") for i in range(count)] if state == "running" else []
         self._closers += [u.close for u in upstreams]
-        standard = sorted(free_ports(count)) if state == "running" else []
+        standard = sorted(quiet_ports(count)) if state == "running" else []
         ports = list(zip(standard, [u.port for u in upstreams]))
         return RigEnvironment(group, name, state, ports, upstreams)
 
