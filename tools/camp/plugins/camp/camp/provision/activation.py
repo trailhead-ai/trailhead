@@ -209,20 +209,24 @@ def reap_member_guard_unlocked(ws_dir: Path, member_names: list[str]) -> None:
     a socket) is unlinked without a flock, because open_lock_file refuses to
     open it and so no process can hold a guard on it. A directory is left in
     place rather than deleted with whatever it holds; the member's next
-    activation refuses it with a message naming the path to delete.
+    activation refuses it with a message naming the path to delete. A regular
+    file it cannot open or lock is left in place too.
     """
+    from ..group.manifest import LockPathError
+
     for name in member_names:
         lock_path = member_guard_lock_path(ws_dir, name)
         try:
             mode = os.lstat(lock_path).st_mode
         except FileNotFoundError:
             continue
-        if stat.S_ISDIR(mode):
-            continue
-        if not stat.S_ISREG(mode):
+        if not stat.S_ISREG(mode) and not stat.S_ISDIR(mode):
             lock_path.unlink(missing_ok=True)
             continue
-        fd = _try_acquire_member_guard(ws_dir, name)
+        try:
+            fd = _try_acquire_member_guard(ws_dir, name)
+        except (LockPathError, OSError):
+            continue
         if fd is None:
             continue
         try:
