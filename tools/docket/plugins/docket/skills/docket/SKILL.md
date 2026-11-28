@@ -4,9 +4,11 @@ description: >
   Keep and read the operator's docket, the ordered list of specs, tasks and notes they mean to work on, in plain words:
   add a record at the place they say or at the bottom, turn a loose thought into a note, show what is next, pick an
   entry up, start one in a new workspace, remove entries or every finished one, and reorder.
+  The docket is the operator's backlog under its new name, so a request that names the backlog is a docket request.
   TRIGGER when: the user says "docket", "what's next", "what should I work on", "add this to my docket",
   "put this on my docket", "remove that from my docket", "clear the finished ones", "move that up", or asks to start
-  or pick up something from the docket.
+  or pick up something from the docket. Also TRIGGER on "backlog", "what is on my backlog", "add this to my backlog",
+  and every other request that names the backlog.
   DO NOT TRIGGER when: the user wants a spec or plan built (use craft) or a pull request handled (use portage).
 ---
 
