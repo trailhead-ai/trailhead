@@ -10,6 +10,9 @@ args = sys.argv[1:]
 with open(os.path.join(state, "calls.log"), "a", encoding="utf-8") as log:
     log.write(" ".join(args) + "\n")
 
+if args[:1] == ["list"] and os.path.exists(os.path.join(state, "fails")):
+    print("camp: cannot reach other hosts from here", file=sys.stderr)
+    sys.exit(1)
 if args[:1] == ["list"]:
     with open(os.path.join(state, "list.json"), encoding="utf-8") as src:
         sys.stdout.write(src.read())

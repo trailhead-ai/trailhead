@@ -8,7 +8,7 @@ traceback. A command signals one by raising ``DocketError`` (exit 1); a usage er
 command or flag) exits 2. A command that reports a result instead of failing returns its own exit
 code from ``run`` (the change commands use 0, 2, 3 and 4) and ``main`` passes it through.
 
-Bare ``docket`` runs the ``report`` command; ``docket --help`` prints the usage.
+Bare ``docket`` (with or without options) runs the ``report`` command; ``docket --help`` prints the usage.
 """
 from __future__ import annotations
 
@@ -45,12 +45,13 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args_in = list(sys.argv[1:] if argv is None else argv)
     parser = _build_parser()
-    if args_in and not args_in[0].startswith("-") and args_in[0] not in COMMANDS:
+    if not args_in or (args_in[0].startswith("-") and args_in[0] not in ("-h", "--help")):
+        args_in.insert(0, "report")
+    if not args_in[0].startswith("-") and args_in[0] not in COMMANDS:
         parser.error(f"unknown command {args_in[0]!r}")
     args = parser.parse_args(args_in)
-    name = args.command or "report"
     try:
-        return COMMANDS[name].run(args) or 0
+        return COMMANDS[args.command].run(args) or 0
     except DocketError as exc:
         print(f"docket: {exc}", file=sys.stderr)
         return 1

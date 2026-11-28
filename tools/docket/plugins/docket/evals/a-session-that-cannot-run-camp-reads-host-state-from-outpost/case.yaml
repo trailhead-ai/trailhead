@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: a-session-that-cannot-run-camp-reads-host-state-from-outpost
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

@@ -3,7 +3,10 @@
 Bare `docket` and `docket report` print it. Docket itself takes no lock, never syncs and writes no
 docket file to produce it. It calls `lore vault ls` and `lore record show`, and what lore does inside those
 calls (for instance its own journal recovery writes) is lore's behaviour, not docket's. Bare `docket` always runs
-inside the sandbox; there, camp's all-hosts listing fails and the hosts it could not ask are reported unanswered.
+inside the sandbox; there, camp's all-hosts listing fails and where workspaces run is unknown, unless
+`--workspace-state FILE` names a file holding Outpost's gateway reply (the session skill fetches it with
+`outpost-gateway docket workspaces`): then `running_on` comes from it, the hosts it could not ask are reported
+unanswered, and a file that cannot be used leaves Outpost itself among the hosts that did not answer.
 
 Document:
 
@@ -22,7 +25,7 @@ whose list file cannot be read has `error` (fixed text naming only the file's pa
 live_count 0; the other vaults still report. `missing` is true only when `lore record show` exits 1 with
 "record not found"; a record whose lookup failed, timed out, printed something unreadable or fell past
 the lookup cap or the total time budget is `status_unknown` and stays live. `running_on` is camp's host
-list for the attached workspace, or null when camp's state is unknown (see `docket.camp`).
+list for the attached workspace, or null when the state is unknown (see `docket.camp`).
 
 Everything derived from a record or from camp is cleaned (`docket.clean`) and appears only under
 `data`. Each entry is looked up once and its document shared by every view that lists it.
@@ -83,7 +86,7 @@ def _lookup(runner: Runner, vault: str, entry: Entry) -> _Lookup:
     try:
         sidecar = json.loads(proc.stdout)["sidecar"]
         return _Lookup(_text(sidecar.get("title")), _text(sidecar.get("status")))
-    except (ValueError, KeyError, TypeError, AttributeError):
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         return _Lookup(unknown=True)
 
 
@@ -140,7 +143,8 @@ def _lookup_all(resolver: _Resolver, lists: dict[str, list[Entry] | None]) -> di
 
 
 def build_report(runner: Runner, camp_runner: Runner, *, budget: float = LOOKUP_BUDGET_SECONDS,
-                 cap: int = LOOKUP_CAP, clock: Callable[[], float] = time.monotonic) -> dict:
+                 cap: int = LOOKUP_CAP, clock: Callable[[], float] = time.monotonic,
+                 workspace_state: str | None = None) -> dict:
     vaults = configured_vaults(runner)
     store = Store(vaults.default_path)
     try:
@@ -148,6 +152,8 @@ def build_report(runner: Runner, camp_runner: Runner, *, budget: float = LOOKUP_
     except UnreadableListError:
         raise DocketError(f"cannot read the vault order file under {vaults.default_path}/sites/docket") from None
     state = camp.fetch(camp_runner)
+    if state.rows is None and workspace_state is not None:
+        state = camp.from_outpost(workspace_state)
     resolver = _Resolver(runner, budget, cap, clock)
     lists: dict[str, list[Entry] | None] = {}
     for vault in order:
@@ -185,11 +191,17 @@ def make_command(runner: Runner | None = None, **options: Any) -> Any:
     """The `report` command; `runner` (default: real lore and camp, each call under a timeout) reaches lore and camp."""
     from docket.cli import Command
 
-    def run(_args: argparse.Namespace) -> int:
+    def add_arguments(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--workspace-state", metavar="FILE",
+                            help="a file holding Outpost's gateway reply, used for where workspaces run "
+                                 "when camp cannot run")
+
+    def run(args: argparse.Namespace) -> int:
         report = build_report(runner or _timed_runner(LOOKUP_TIMEOUT_SECONDS),
-                              runner or _timed_runner(CAMP_TIMEOUT_SECONDS), **options)
+                              runner or _timed_runner(CAMP_TIMEOUT_SECONDS),
+                              workspace_state=args.workspace_state, **options)
         print(json.dumps(report, indent=2))
         return 0
 
     return Command("Print every vault's docket list, the All view and the finished entries as JSON.",
-                   lambda parser: None, run)
+                   add_arguments, run)

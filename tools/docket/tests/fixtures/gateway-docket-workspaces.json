@@ -1,0 +1,39 @@
+{
+  "answered": {
+    "available": true,
+    "rows": [
+      {
+        "group": "trailhead",
+        "slug": "docket",
+        "host": "workstation",
+        "state": "running"
+      },
+      {
+        "group": "trailhead",
+        "slug": "docket",
+        "host": "mac-mini",
+        "state": "stopped"
+      },
+      {
+        "group": "trailhead",
+        "slug": "lookup",
+        "host": "workstation",
+        "state": "unknown"
+      }
+    ],
+    "unanswered": [
+      {
+        "host": "laptop",
+        "state": "unknown",
+        "reason": "unreachable"
+      }
+    ],
+    "fetchedAt": 1780315200000
+  },
+  "nothing_cached": {
+    "available": false,
+    "rows": [],
+    "unanswered": [],
+    "fetchedAt": null
+  }
+}

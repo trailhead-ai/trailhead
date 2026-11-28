@@ -21,7 +21,7 @@ Every clause holds.
 | A blob record file was created in the vault | `a-blob-record-was-created` | `file_exists` |
 | The docket list file holds a blob entry | `list-holds-the-note` | `regex` |
 | docket add named the new note by its eval/blob ref | `note-added-by-ref` | `tool_used` |
-| The words of the thought after its title were not on any Bash command line | `thought-body-not-on-a-command-line` | `tool_used` |
+| The title passed to lore is a short plain label (opens with a letter or digit, at most six words, one quoted argument), so the thought's body is not on a command line | `thought-body-not-on-a-command-line` | `tool_used` |
 
 ## Limitations
 

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -35,6 +36,10 @@ RUNS = [
     {"id": 2, "workspace": "trailhead/ws", "job": "lint", "state": "in_progress",
      "result": None, "reason": None, "created_at": "2026-11-10T09:05:00Z"},
 ]
+
+DOCKET_FIXTURE = json.loads(
+    (Path(__file__).resolve().parents[2] / "tools/docket/tests/fixtures/gateway-docket-workspaces.json").read_text()
+)
 
 SANDBOX_LINE = "outpost-gateway is running inside the sandbox; run it on its own, not piped or chained"
 
@@ -276,6 +281,10 @@ class TestHygiene:
         "token-garbage": dict(token_reply=(200, "<<not json>>")),
         "runs-garbage": dict(runs_reply=(200, "<<not json>>")),
         "runs-wrong-shape": dict(runs_reply=(200, {"workspace": 7, "runs": "x"})),
+        "docket-workspaces": dict(argv=("docket", "workspaces"), docket_workspaces=DOCKET_FIXTURE["answered"]),
+        "docket-workspaces-refused": dict(
+            argv=("docket", "workspaces"), docket_reply=(403, {"reason": "scope_missing", "message": "Nope."})
+        ),
     }
 
     @pytest.mark.parametrize("name", sorted(SCENARIOS))
@@ -1367,6 +1376,58 @@ class TestRegistersOnDemand:
             rc, _, err = unregistered(stub.port, *self.LIST)
         assert rc == 2
         assert err == "outpost-gateway: this session registered but Outpost left it no gateway credential\n"
+
+
+class TestDocketWorkspaces:
+    ARGV = ("docket", "workspaces")
+
+    @pytest.mark.parametrize("shape", sorted(DOCKET_FIXTURE))
+    def test_prints_the_body_outpost_answered_with_as_json(self, shape, cli):
+        with StubOutpost(docket_workspaces=DOCKET_FIXTURE[shape]) as stub:
+            rc, out, err = cli(stub.port, *self.ARGV)
+        assert (rc, err) == (0, "")
+        assert json.loads(out) == DOCKET_FIXTURE[shape]
+
+    def test_asks_the_docket_route_with_the_bearer_token_the_stub_issued(self, cli):
+        with StubOutpost(token="a-different-token") as stub:
+            cli(stub.port, *self.ARGV)
+            asked = [q for q in stub.requests if q.path == "/gateway/docket/workspaces"]
+        assert [(q.method, q.headers["authorization"]) for q in asked] == [("GET", "Bearer a-different-token")]
+
+    def test_a_refusal_is_named_by_its_reason_code(self, cli):
+        with StubOutpost(docket_reply=(403, {"reason": "scope_missing", "message": "Nope."})) as stub:
+            rc, out, err = cli(stub.port, *self.ARGV)
+        assert (rc, out) == (2, "")
+        assert err == "outpost-gateway: scope_missing: Nope.\n"
+
+    @pytest.mark.parametrize("reply", ["<<not json>>", "[1, 2]", {"rows": []}, {"available": "yes"}])
+    def test_a_reply_of_the_wrong_shape_is_reported_as_unreadable(self, reply, cli):
+        with StubOutpost(docket_reply=(200, reply)) as stub:
+            rc, out, err = cli(stub.port, *self.ARGV)
+        assert (rc, out) == (2, "")
+        assert err == f"outpost-gateway: {command.CANNOT_READ}\n"
+
+    def test_an_outpost_that_takes_the_token_and_never_answers_the_route_is_unreachable_within_the_budget(self, cli):
+        import time
+
+        with StubOutpost(docket_delay=60) as stub:
+            started = time.monotonic()
+            rc, out, err = cli(stub.port, *self.ARGV)
+            elapsed = time.monotonic() - started
+        assert (rc, out) == (2, "")
+        assert err == f"outpost-gateway: Outpost is unreachable at 127.0.0.1:{stub.port}; is it running?\n"
+        assert elapsed < 5.0
+
+    def test_an_outpost_that_accepts_and_never_answers_is_unreachable_within_the_budget(self, cli):
+        import time
+
+        with SilentOutpost() as silent:
+            started = time.monotonic()
+            rc, out, err = cli(silent.port, *self.ARGV)
+            elapsed = time.monotonic() - started
+        assert (rc, out) == (2, "")
+        assert err == f"outpost-gateway: Outpost is unreachable at 127.0.0.1:{silent.port}; is it running?\n"
+        assert elapsed < 5.0
 
 
 class SilentOutpost:

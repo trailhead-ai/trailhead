@@ -147,6 +147,8 @@ class StubOutpost:
     when set, gives each successive log request its own steps (the last repeats); ``view_sequence``
     likewise gives each successive view request its own body; ``log_chunked`` sends the log chunked,
     and a ``Cut`` step ends it mid-chunk. ``log_reply`` answers the log route wholesale (a refusal).
+    ``GET /gateway/docket/workspaces`` answers ``docket_workspaces`` (or ``docket_reply``), after
+    ``docket_delay`` seconds.
     ``POST /gateway/runs/<id>/cancel`` answers 202 ``completed``/``cancelled`` (or ``cancel_reply``),
     after ``cancel_delay`` seconds.
     ``on_register`` is called with the session key a successful registration answers for (a real Outpost
@@ -183,6 +185,11 @@ class StubOutpost:
     log_connections: list[list] | None = None
     view_sequence: list[dict] | None = None
     log_chunked: bool = False
+    docket_workspaces: object = field(
+        default_factory=lambda: {"available": False, "rows": [], "unanswered": [], "fetchedAt": None}
+    )
+    docket_reply: tuple[int, object] | None = None
+    docket_delay: float = 0.0
     requests: list[Seen] = field(default_factory=list)
     issued: list[str] = field(default_factory=list)
     uses: dict[str, int] = field(default_factory=dict)
@@ -337,6 +344,13 @@ class StubOutpost:
                                 )
                             self._send(200, stub.view)
                         return
+                if urlsplit(self.path).path == "/gateway/docket/workspaces":
+                    if stub.docket_reply is not None:
+                        return self._send(*stub.docket_reply)
+                    if self._authorised():
+                        stub.release.wait(stub.docket_delay)
+                        self._send(200, stub.docket_workspaces)
+                    return
                 if stub.runs_redirect is not None and self.path == "/gateway/runs":
                     return self._redirect(stub.runs_redirect)
                 if self.path != "/gateway/runs":

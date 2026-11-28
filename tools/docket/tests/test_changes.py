@@ -9,6 +9,8 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import subprocess
+import sys
 
 import pytest
 
@@ -20,6 +22,28 @@ from docket.store import Store
 
 
 BASE = ("task/a", "task/b", "task/c")
+DEEP = "[" * 100_000 + "]" * 100_000
+DEEP_OBJECT = '{"a": ' + DEEP + "}"
+
+
+def _another_process_writes(env, text):
+    def hook(fake):
+        subprocess.run([sys.executable, "-c", "import sys, pathlib; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])",
+                        str(env.list_path()), text], check=True)
+    return hook
+
+
+def _printing(env, monkeypatch, prefix, stdout, code=0):
+    """The env's fake, except that a call starting with `prefix` prints `stdout`."""
+    from _docket_cli import completed, install
+    from docket import changes
+
+    def runner(argv):
+        if list(argv)[:len(prefix)] == prefix:
+            return completed(argv, code, stdout)
+        return env.fake(argv)
+
+    install(monkeypatch, changes.make_commands(runner, lock_deadline=0.2))
 
 
 class TestAddPlacement:
@@ -346,6 +370,41 @@ def _restore(env, text):
     return hook
 
 
+class TestAttachGroup:
+    @pytest.mark.parametrize("group", ["Trailhead", "trailhead", "Team-1.x_y"])
+    def test_a_group_under_the_vault_name_rule_attaches(self, env, group):
+        env.put(DEFAULT, *BASE)
+        code, doc, _ = env.run("attach", "--", ref("task/b"), f"{group}/docket")
+        assert (code, doc["outcome"]) == (0, "saved")
+        assert env.entries() == ["task/a", f"task/b@{group}/docket", "task/c"]
+
+
+class TestNestedDocuments:
+    def test_a_deeply_nested_record_on_add_is_refused_cleanly(self, env, monkeypatch):
+        _printing(env, monkeypatch, ["lore", "record", "show"], DEEP)
+        code, doc, err = env.run("add", "--", ref("task/n1"))
+        assert (code, doc["outcome"]) == (2, "refused")
+        assert "cannot be read" in doc["message"]
+
+    @pytest.mark.parametrize("text", [DEEP, DEEP_OBJECT], ids=["deep-array", "deep-object"])
+    def test_a_deeply_nested_vault_listing_is_a_docket_error_not_a_traceback(self, env, monkeypatch, text):
+        _printing(env, monkeypatch, ["lore", "vault", "ls"], text)
+        code, doc, err = env.run("add", "--", ref("task/n1"))
+        assert (code, doc, err.startswith("docket: ")) == (1, None, True)
+
+    def test_a_deeply_nested_sync_document_is_read_as_no_document(self, env, monkeypatch):
+        _printing(env, monkeypatch, ["lore", "sync"], DEEP_OBJECT)
+        code, doc, _ = env.run("add", "--", ref("task/n1"))
+        assert (code, doc["outcome"]) == (0, "saved")
+        assert env.entries() == ["task/n1"]
+
+    def test_a_deeply_nested_failed_sync_is_reported_by_its_exit_code(self, env, monkeypatch):
+        _printing(env, monkeypatch, ["lore", "sync"], DEEP_OBJECT, code=1)
+        code, doc, _ = env.run("add", "--", ref("task/n1"))
+        assert (code, doc["outcome"]) == (3, "saved-not-synced")
+        assert "exit 1" in doc["sync_warning"]
+
+
 class TestLostToRemote:
     @pytest.mark.parametrize("op, argv", [
         ("add", ["add", "--", ref("task/n1")]),
@@ -360,9 +419,17 @@ class TestLostToRemote:
         code, doc, _ = env.run(*argv)
         assert code == 4
         assert doc["outcome"] == "lost-to-remote"
-        assert "another host" in doc["message"]
+        assert "another writer" in doc["message"]
         assert doc["lists"] == {"proj": [{"kind": "task", "slug": s} for s in ("a", "b", "c")]}
         assert env.entries() == list(BASE)
+
+    def test_a_change_another_local_process_altered_between_write_and_re_read_is_lost_without_naming_a_host(self, env):
+        env.put(DEFAULT, *BASE)
+        env.fake.sync_hooks = {1: _another_process_writes(env, env.list_path().read_text())}
+        code, doc, _ = env.run("add", "--", ref("task/n1"))
+        assert (code, doc["outcome"]) == (4, "lost-to-remote")
+        assert "host" not in doc["message"].lower()
+        assert doc["lists"] == {"proj": [{"kind": "task", "slug": s} for s in ("a", "b", "c")]}
 
     def test_a_detach_that_a_remote_copy_replaced_is_lost_to_remote(self, env):
         env.put(DEFAULT, "task/a", ("task/b", "trailhead", "docket"))
@@ -443,7 +510,9 @@ class TestValidation:
         ["remove", "--", "proj/-task/x"],
         ["top", "--", "../x"],
         ["attach", "--", ref("task/a"), "-rf/x"],
-        ["attach", "--", ref("task/a"), "Group/slug"],
+        ["attach", "--", ref("task/a"), "gro up/slug"],
+        ["attach", "--", ref("task/a"), "grp!/slug"],
+        ["attach", "--", ref("task/a"), ".grp/slug"],
         ["attach", "--", ref("task/a"), "group/Slug"],
         ["attach", "--", ref("task/a"), "group"],
         ["attach", "--", ref("task/a"), "group/"],

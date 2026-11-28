@@ -12,7 +12,7 @@
    (a newer-format copy, a lock timeout) cannot show the change gone, so the write that landed reports
    as saved-not-synced. Lore settles a
    conflicting `sites/` file by taking the remote copy outright and still reports `published`, so only
-   this re-read shows a change another host replaced.
+   this re-read shows a change another writer (another host, or another process on this one) replaced.
 
 The outcome is `lost-to-remote` if the change did not survive (exit 4), else `saved-not-synced` if the
 pre-sync or post-sync failed or the synced test says unpublished (exit 3), else `saved` (exit 0);
@@ -52,7 +52,7 @@ def _sync_document(stdout: str) -> dict | None:
     for match in _DOCUMENT_START.finditer(stdout):
         try:
             doc, _end = json.JSONDecoder().raw_decode(stdout[match.start():])
-        except ValueError:
+        except (ValueError, RecursionError):
             continue
         if isinstance(doc, dict):
             return doc
