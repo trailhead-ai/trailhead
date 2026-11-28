@@ -610,7 +610,8 @@ def run_world(tmp_path_factory):
                     ("view_w1_run", gateway_call(gateway, "run", "view", str(first_id))),
                     ("watch_w1_run", gateway_call(gateway, "run", "watch", str(first_id))),
                     ("view_missing", gateway_call(gateway, "run", "view", "99999")),
-                    ("start_own", gateway_call(gateway, "run", "start", "pass")),
+                    ("start_own", f'own=$({gateway_call(gateway, "run", "start", "pass")} 2>&1); echo "$own"'),
+                    ("watch_own", f'{gateway_call(gateway, "run", "watch")} "$own" --exit-status'),
                 ],
                 env,
             )
@@ -621,7 +622,6 @@ def run_world(tmp_path_factory):
                 camp.w2 / "app",
                 [
                     ("register", register_cmd()),
-                    ("watch_own", gateway_call(gateway, "run", "watch", own_id, "--exit-status")),
                     ("list_after", gateway_call(gateway, "run", "list")),
                 ],
                 env,
@@ -842,8 +842,9 @@ def test_run_scenario_another_workspaces_session_cannot_see_or_start_the_first_o
     own = {r[2]: r[1] for r in run_world.rows_final if r[1] == f"{GROUP}/{W2}"}
     assert own == {"pass": f"{GROUP}/{W2}"}, run_world.rows_final
     assert [r[1] for r in run_world.rows_final].count(f"{GROUP}/{W1}") == len(SESSION_JOBS) + 1
+    # Outpost cancels a run whose starting session has ended, so the session that started the run watches it.
+    assert w2["watch_own"].splitlines()[-1] == "rc=0", (w2["watch_own"], run_world.rows_final)
     second = run_world.w2_second
-    assert second["watch_own"].splitlines()[-1] == "rc=0", (second["watch_own"], run_world.rows_final)
     assert "pass" in second["list_after"] and not {"slow", "mount_priv", "fail"} & set(second["list_after"].split())
     cross = run_world.w1_cross
     assert "in this workspace" in cross["view_w2_run"] and cross["view_w2_run"].splitlines()[-1] == "rc=2"

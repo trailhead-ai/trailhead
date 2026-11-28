@@ -16,7 +16,9 @@ import shlex
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
+import time
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -47,6 +49,7 @@ from ._gateway_e2e_support import (
     denial_steps,
     dotfiles_checkout,
     eval_start_step,
+    TcpTokenRecorder,
     launched_session_settings,
     meeting_folder,
     read_results,
@@ -524,3 +527,54 @@ def test_the_eval_start_step_is_one_simple_command_reporting_the_start_and_the_s
     out = ran.stdout + ran.stderr
     for line in expected:
         assert line in out, out
+
+
+def test_a_trusted_checkout_carries_what_the_portage_eval_script_imports(tmp_path):
+    from ._trusted_checkout import make_trusted_checkout
+
+    checkout = make_trusted_checkout(tmp_path / "checkout")
+    ran = subprocess.run(
+        [sys.executable, "-I", str(checkout / "bin" / "_portage_eval.py"), "start", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert ran.returncode == 0, ran.stderr
+    assert "usage" in ran.stdout.lower(), ran.stdout
+
+
+def _open_descriptors() -> int:
+    return len(os.listdir("/proc/self/fd"))
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="counts descriptors through /proc")
+@pytest.mark.parametrize("requests", [1, 40])
+def test_the_token_relay_lets_go_of_each_connection_once_it_is_answered(requests):
+    server = socket.create_server(("127.0.0.1", 0))
+
+    def answer():
+        while True:
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            with conn:
+                conn.recv(65536)
+                conn.sendall(b'{"access_token": "tok-x"}')
+
+    threading.Thread(target=answer, daemon=True).start()
+    try:
+        with TcpTokenRecorder(server.getsockname()[1]) as relay:
+            before = _open_descriptors()
+            for _ in range(requests):
+                with socket.create_connection(("127.0.0.1", relay.port), timeout=10) as client:
+                    client.sendall(b"Authorization: Bearer tok-y\r\n\r\n")
+                    while client.recv(65536):
+                        pass
+            deadline = time.monotonic() + 10
+            while _open_descriptors() > before and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert _open_descriptors() <= before, f"{_open_descriptors() - before} descriptors still open"
+            assert relay.tokens == {"tok-x", "tok-y"}
+    finally:
+        server.close()

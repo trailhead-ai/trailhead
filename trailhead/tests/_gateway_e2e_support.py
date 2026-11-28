@@ -1561,8 +1561,13 @@ class _TokenRelay:
             client.close()
             return
         self._open += [client, upstream]
-        threading.Thread(target=self._pump, args=(client, upstream, _BEARER), daemon=True).start()
+        forward = threading.Thread(target=self._pump, args=(client, upstream, _BEARER), daemon=True)
+        forward.start()
         self._pump(upstream, client, _ACCESS_TOKEN)
+        forward.join()
+        for sock in (client, upstream):
+            sock.close()
+            self._open.remove(sock)
 
     def _pump(self, source: socket.socket, sink: socket.socket, pattern: re.Pattern[bytes]) -> None:
         tail = b""

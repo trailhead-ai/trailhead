@@ -18,7 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def make_trusted_checkout(dest: Path, source: Path = REPO_ROOT) -> Path:
-    """Copy what the pinned scripts run (``bin/``, the ``trailhead`` package, ``pyproject.toml``) of *source* to
+    """Copy what the pinned scripts run (``bin/``, the ``trailhead`` package, the portage plugin ``portage-eval`` imports,
+    ``pyproject.toml``) of *source* to
     *dest*, closed to group and others."""
     dest.mkdir(parents=True)
     shutil.copytree(
@@ -29,6 +30,8 @@ def make_trusted_checkout(dest: Path, source: Path = REPO_ROOT) -> Path:
         dest / "trailhead",
         ignore=shutil.ignore_patterns("tests", "__pycache__"),
     )
+    portage = Path("tools") / "portage" / "plugins" / "portage"
+    shutil.copytree(source / portage, dest / portage, ignore=shutil.ignore_patterns("tests", "evals", "__pycache__"))
     shutil.copy2(source / "pyproject.toml", dest / "pyproject.toml")
     for path in [dest, *dest.rglob("*")]:
         if not path.is_symlink():

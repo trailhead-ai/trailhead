@@ -15,6 +15,8 @@ import os
 import json
 import re
 import secrets
+import shlex
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +40,7 @@ from ._gateway_e2e_support import (
     run_fake_harness,
     step_env,
     install_shims,
+    start_fake_harness,
     gateway_call,
     scan_leaks,
 )
@@ -103,6 +106,7 @@ def cancel_world(tmp_path_factory):
     leftover = _wait(30, lambda: not runner_act_processes())
     assert leftover, f"an act process is already running as outpost-runner: {runner_act_processes()}"
     sentinel = HomeSentinel(home / f".outpost-e2e-{secrets.token_hex(4)}", f"SENTINEL-{secrets.token_hex(8)}")
+    starters: list = []
     try:
         sentinel.create()
         with (
@@ -133,7 +137,21 @@ def cancel_world(tmp_path_factory):
             w1 = camp.w1 / "app"
 
             def start(job):
-                out = gw(w1, "run", "start", job)
+                """Start *job* from a harness that stays alive until the scenario ends: Outpost cancels a run whose
+                starting session has ended."""
+                name = f"h{next(n)}"
+                stop = root / f"{name}.stop"
+                script = (
+                    f"{register_cmd()} >/dev/null 2>&1; {gateway_call(gateway, 'run', 'start', job)} 2>&1; "
+                    f'echo "rc=$?"; while [ ! -e {shlex.quote(str(stop))} ]; do sleep 0.2; done'
+                )
+                proc = start_fake_harness(root, name, w1, script, env)
+                starters.append((proc, stop))
+                out = ""
+                for line in proc.stdout:
+                    out += line
+                    if line.startswith("rc="):
+                        break
                 found = re.search(r"^(\d+)$", out, re.M)
                 assert found, f"start {job} did not print a run id: {out!r}"
                 return int(found.group(1))
@@ -186,6 +204,14 @@ def cancel_world(tmp_path_factory):
                 scan_leaks(outpost, recorder, sampler, host),
             )
     finally:
+        for proc, stop in starters:
+            stop.touch()
+        for proc, _ in starters:
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            proc.stdout.close()
         remove_act_containers(host.engine_socket)
         sentinel.remove()
 
