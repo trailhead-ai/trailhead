@@ -1232,17 +1232,19 @@ def _plant_symlinked_slug_lock(remove_env, tmp_path: Path) -> Path:
 
 class TestVerbsRefuseBadLockPathsWithOnePrefix:
     @pytest.mark.parametrize(
-        ("argv", "prefix"),
+        ("argv", "prefix", "lines_before"),
         [
             (["activate", "--background", "repo_a", "--name", "ws-slug"],
-             "camp activate --background: lock folder "),
-            (["setup", "ws-slug"], "camp setup: lock folder "),
-            (["remove", "ws-slug"], "camp remove: lock folder "),
-            (["new", "another-slug", "--no-session"], "camp new: workspace bring-up failed: lock folder "),
+             "camp activate --background: lock folder ", 0),
+            (["setup", "ws-slug"], "camp setup: lock folder ", 0),
+            # remove prints its ownership notice first when no host name is declared
+            (["remove", "ws-slug"], "camp remove: lock folder ", 1),
+            (["new", "another-slug", "--no-session"],
+             "camp new: workspace bring-up failed: lock folder ", 0),
         ],
         ids=["activate-background", "setup", "remove", "new"],
     )
-    def test_the_refusal_carries_one_camp_prefix(self, remove_env, argv, prefix):
+    def test_the_refusal_carries_one_camp_prefix(self, remove_env, argv, prefix, lines_before):
         if "--background" in argv:
             (remove_env["config_dir"] / "groups" / "rmgroup.toml").write_text(
                 f'''[group]
@@ -1268,7 +1270,9 @@ cmd = ["true"]
 
         assert r.returncode == 1, r.stderr
         assert "Traceback" not in r.stderr, r.stderr
-        refusal = r.stderr.strip().splitlines()[-1]
+        lines = r.stderr.strip().splitlines()
+        assert len(lines) == lines_before + 1, r.stderr
+        refusal = lines[-1]
         assert refusal.startswith(prefix), r.stderr
         assert "camp: " not in refusal[len(prefix):], r.stderr
         assert str(locks) in refusal, r.stderr
