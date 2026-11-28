@@ -2264,6 +2264,38 @@ def test_reaping_member_guards_removes_only_the_named_members_locks(tmp_path: Pa
     assert sorted(p.name for p in (worktrees / ".locks").iterdir()) == ["feat-x.repo_b.activate.lock"]
 
 
+def test_reaping_member_guards_leaves_a_directory_guard_and_reaps_the_rest(tmp_path: Path) -> None:
+    import camp.provision.activation as activation
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    activation._release_member_guard(activation._try_acquire_member_guard(ws_dir, "repo_b"))
+    planted = worktrees / ".locks" / "feat-x.repo_a.activate.lock"
+    planted.mkdir()
+
+    activation.reap_member_guard_unlocked(ws_dir, ["repo_a", "repo_b"])
+
+    assert sorted(p.name for p in (worktrees / ".locks").iterdir()) == ["feat-x.repo_a.activate.lock"]
+    assert planted.is_dir()
+
+
+def test_reaping_member_guards_leaves_a_guard_it_cannot_open_and_reaps_the_rest(tmp_path: Path) -> None:
+    import camp.provision.activation as activation
+
+    worktrees = tmp_path / "worktrees"
+    ws_dir = worktrees / "feat-x"
+    ws_dir.mkdir(parents=True)
+    for name in ("repo_a", "repo_b"):
+        activation._release_member_guard(activation._try_acquire_member_guard(ws_dir, name))
+    unopenable = worktrees / ".locks" / "feat-x.repo_a.activate.lock"
+    unopenable.chmod(0o400)
+
+    activation.reap_member_guard_unlocked(ws_dir, ["repo_a", "repo_b"])
+
+    assert sorted(p.name for p in (worktrees / ".locks").iterdir()) == ["feat-x.repo_a.activate.lock"]
+
+
 def test_a_symlinked_member_guard_lock_is_refused_and_its_target_left_untouched(tmp_path: Path) -> None:
     import pytest
 

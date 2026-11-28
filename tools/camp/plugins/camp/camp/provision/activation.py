@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -201,13 +202,31 @@ def reap_member_guard_unlocked(ws_dir: Path, member_names: list[str]) -> None:
     guard is currently held by a live run is skipped rather than force-removed
     — a stale-but-live holder is a rare, later-reapable leak rather than an
     unsafe unlink.
+
+    Never raises for an entry it cannot lock: it runs after the teardown has
+    already succeeded, so a refusal here would report a finished removal as a
+    failure. A symlink or any other non-regular, non-directory entry (a fifo,
+    a socket) is unlinked without a flock, because open_lock_file refuses to
+    open it and so no process can hold a guard on it. A directory is left in
+    place rather than deleted with whatever it holds; the member's next
+    activation refuses it with a message naming the path to delete. A regular
+    file it cannot open or lock is left in place too.
     """
+    from ..group.manifest import LockPathError
+
     for name in member_names:
         lock_path = member_guard_lock_path(ws_dir, name)
-        if lock_path.is_symlink():
-            lock_path.unlink()
+        try:
+            mode = os.lstat(lock_path).st_mode
+        except FileNotFoundError:
             continue
-        fd = _try_acquire_member_guard(ws_dir, name)
+        if not stat.S_ISREG(mode) and not stat.S_ISDIR(mode):
+            lock_path.unlink(missing_ok=True)
+            continue
+        try:
+            fd = _try_acquire_member_guard(ws_dir, name)
+        except (LockPathError, OSError):
+            continue
         if fd is None:
             continue
         try:

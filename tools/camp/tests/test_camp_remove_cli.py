@@ -1362,3 +1362,34 @@ class TestRemoveReapsSymlinkedMemberLocks:
         assert not link.is_symlink() and not link.exists()
         assert not regular.exists()
         assert victim.read_text() == "precious"
+
+
+class TestRemoveSucceedsPastANonRegularMemberLock:
+    @pytest.mark.parametrize("plant", ["directory", "fifo", "unopenable"])
+    def test_the_teardown_is_reported_as_removed(self, remove_env, plant):
+        locks = remove_env["state_dir"] / "rmgroup" / "worktrees" / ".locks"
+        planted = locks / "ws-slug.repo_a.activate.lock"
+        if plant == "directory":
+            planted.mkdir()
+            (planted / "keep.txt").write_text("keep")
+        elif plant == "unopenable":
+            planted.write_text("")
+            planted.chmod(0o400)
+        else:
+            os.mkfifo(planted)
+        regular = locks / "ws-slug.repo_b.activate.lock"
+        regular.write_text("")
+
+        r = _camp(remove_env, "remove", "ws-slug", "--group", "rmgroup")
+
+        assert r.returncode == 0, r.stderr
+        assert "Traceback" not in r.stderr, r.stderr
+        assert "camp remove: removed worktree 'ws-slug'" in r.stderr, r.stderr
+        assert not _manifest_path(remove_env).exists()
+        assert not regular.exists()
+        if plant == "directory":
+            assert (planted / "keep.txt").read_text() == "keep"
+        elif plant == "unopenable":
+            assert planted.is_file()
+        else:
+            assert not planted.exists() and not planted.is_symlink()
