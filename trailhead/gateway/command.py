@@ -13,8 +13,9 @@ characters before it reaches the terminal.
 ``run start`` uploads the working tree and prints the new run's id, and refuses a tree whose real top level is not
 inside the camp workspace the harness process works in; ``run watch`` follows
 a run's log; ``run view`` and ``run list`` show runs (``run view --log`` prints a run's whole
-log once, without following); ``run cancel`` asks Outpost to cancel a queued or running run; ``docket workspaces`` prints, as JSON, where
-docket's workspaces run on every host, as Outpost last saw them.
+log once, without following); ``run cancel`` asks Outpost to cancel a queued or running run;
+``docket workspaces`` prints, as JSON,
+where docket's workspaces run on every host, as Outpost last saw them.
 Exit codes: 0 done, 1 (``watch --exit-status`` only) the job ran and failed or the run was
 cancelled, 3 (``watch --exit-status`` only) the run did
 not execute, 2 anything else that went wrong, including every refusal from Outpost, an
@@ -493,7 +494,8 @@ def _parser() -> argparse.ArgumentParser:
         "  run view <id> [--log]                 show a run, or print its whole log once\n"
         "  run cancel <id>                       cancel a queued or running run\n"
         "  run list [--json]                     list the workspace's runs\n"
-        "  docket workspaces                     print where docket's workspaces run, as Outpost last saw them (JSON)\n\n"
+        "  docket workspaces                     print where docket's workspaces run, as Outpost last saw them "
+        "(JSON)\n\n"
         f"run it as: {shim} run list",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

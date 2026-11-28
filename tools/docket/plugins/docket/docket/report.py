@@ -193,7 +193,8 @@ def make_command(runner: Runner | None = None, **options: Any) -> Any:
 
     def add_arguments(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--workspace-state", metavar="FILE",
-                            help="a file holding Outpost's gateway reply, used for where workspaces run when camp cannot run")
+                            help="a file holding Outpost's gateway reply, used for where workspaces run "
+                                 "when camp cannot run")
 
     def run(args: argparse.Namespace) -> int:
         report = build_report(runner or _timed_runner(LOOKUP_TIMEOUT_SECONDS),

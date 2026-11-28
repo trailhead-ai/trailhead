@@ -7,8 +7,9 @@ change commands report as the outcome `refused` with exit 2 and nothing written.
 
 A REF is `<vault>/<kind>/<slug>`: exactly three non-empty parts, no value begins with a dash, and
 kind and slug use the store's own validators (lowercase letters, digits, `.`, `_`, `-`). A workspace
-is `GROUP/SLUG`, the group under the vault-name rule and the slug under the slug rule. A vault named on its own (set-order, vault-order) is one part with
-no `/`, under the store's vault-name rule. The store validates again on every path it opens.
+is `GROUP/SLUG`, the group under the vault-name rule and the slug under the slug rule. A vault named
+on its own (set-order, vault-order) is one part with no `/`, under the store's vault-name rule. The store
+validates again on every path it opens.
 """
 from __future__ import annotations
 

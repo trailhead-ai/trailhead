@@ -147,7 +147,8 @@ class StubOutpost:
     when set, gives each successive log request its own steps (the last repeats); ``view_sequence``
     likewise gives each successive view request its own body; ``log_chunked`` sends the log chunked,
     and a ``Cut`` step ends it mid-chunk. ``log_reply`` answers the log route wholesale (a refusal).
-    ``GET /gateway/docket/workspaces`` answers ``docket_workspaces`` (or ``docket_reply``), after ``docket_delay`` seconds.
+    ``GET /gateway/docket/workspaces`` answers ``docket_workspaces`` (or ``docket_reply``), after
+    ``docket_delay`` seconds.
     ``POST /gateway/runs/<id>/cancel`` answers 202 ``completed``/``cancelled`` (or ``cancel_reply``),
     after ``cancel_delay`` seconds.
     ``on_register`` is called with the session key a successful registration answers for (a real Outpost
