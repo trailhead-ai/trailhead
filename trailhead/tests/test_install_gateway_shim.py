@@ -238,6 +238,7 @@ class TestShimBuild:
             "HOME": str(tmp_path / "home dir"),
             "TRAILHEAD_STATE_DIR": str(spaced),
             "OUTPOST_STATE_DIR": str(spaced / "outpost"),
+            "CAMP_STATE_DIR": str(spaced / "camp"),
             "XDG_STATE_HOME": str(spaced / "xdg"),
         }
         hostile = tmp_path / "hostile"
@@ -250,6 +251,7 @@ class TestShimBuild:
                 "PATH": f"{hostile}/bin:/usr/bin:/bin",
                 "TRAILHEAD_STATE_DIR": str(hostile / "trailhead"),
                 "OUTPOST_STATE_DIR": str(hostile / "outpost"),
+                "CAMP_STATE_DIR": str(hostile / "camp"),
                 "XDG_STATE_HOME": str(hostile / "xdg"),
                 "SOME_SESSION_VARIABLE": "x",
             },
@@ -272,10 +274,12 @@ class TestShimBuild:
                 "PATH": "/usr/bin:/bin",
                 "TRAILHEAD_STATE_DIR": str(tmp_path / "planted"),
                 "OUTPOST_STATE_DIR": str(tmp_path / "planted"),
+                "CAMP_STATE_DIR": str(tmp_path / "planted"),
             },
             install_env,
         )
         assert "TRAILHEAD_STATE_DIR" not in seen and "OUTPOST_STATE_DIR" not in seen
+        assert "CAMP_STATE_DIR" not in seen
         assert seen["HOME"] == install_env["HOME"] and seen["XDG_STATE_HOME"] == install_env["XDG_STATE_HOME"]
 
     def test_outpost_disabled_writes_no_shim(self, tmp_path):

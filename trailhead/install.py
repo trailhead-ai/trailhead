@@ -130,7 +130,7 @@ def _with_own_binaries(cli_tools: dict[str, Path], root: Path | None) -> dict[st
     return tools
 
 
-_BAKED_STATE_VARS = ("TRAILHEAD_STATE_DIR", "OUTPOST_STATE_DIR", "XDG_STATE_HOME")
+_BAKED_STATE_VARS = ("TRAILHEAD_STATE_DIR", "OUTPOST_STATE_DIR", "CAMP_STATE_DIR", "XDG_STATE_HOME")
 
 
 def _baked_state_env(env: dict[str, str]) -> dict[str, str]:
