@@ -422,8 +422,6 @@ merge` refuses with exit 2 before any `gh` call — honor that exit code and sur
 `portage merge` exits nonzero on any partial-merge. The agent relies on that exit code, not JSON
 parsing, to detect failure.
 
-Then clean up per repo: `git -C <repo_path> checkout main && git -C <repo_path> pull`.
-
 Finally, update the prs.json sidecar at `<manifest_dir>/prs.json` to reflect the merged state.
 
 ## External tracker

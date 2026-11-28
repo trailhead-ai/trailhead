@@ -683,14 +683,6 @@ Every camp group member is a peer — there is no privileged member.
 
 4. **Report results.** If any failed, surface the reason and suggest next steps.
 
-5. **Clean up** after all PRs merge:
-
-   ```bash
-   git -C <repo> checkout main && git -C <repo> pull
-   ```
-
-   for each merged repo.
-
 ### External tracker
 
 After successful merge, check `[release].external_tracker` in the group TOML.

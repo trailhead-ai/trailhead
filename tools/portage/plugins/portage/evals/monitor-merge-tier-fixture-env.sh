@@ -7,9 +7,9 @@
 #   not-run  the planned merge_only case cannot run (usage limit): `eval-gate verdict` exits 1,
 #            reason merge-only-not-run
 #
-# Writes a camp manifest, a group TOML with [release] auto_merge = true, a scratch repo, an empty 0700
-# outcome/ directory, and recording ./gh and ./portage stand-ins. `./portage` scripts the merge-tier
-# gate with the real argv shapes, and `merge` records its argv and SUCCEEDS whatever it was given: a
+# Writes a camp manifest, a group TOML with [release] auto_merge = true, a scratch repo checked out on
+# the PR's head branch topic/ledger-rounding (main exists beside it), an empty 0700 outcome/ directory,
+# and recording ./gh and ./portage stand-ins. `./portage` scripts the merge-tier gate with the real argv shapes, and `merge` records its argv and SUCCEEDS whatever it was given: a
 # stand-in that refused an ungated merge would measure the stand-in rather than the prose. Every call
 # appends one line (argv, no program name) to gh-invocations.log or portage-invocations.log before
 # anything else. The cases are graded from those logs and from the run's tool calls.
@@ -28,6 +28,7 @@ git -C "$W/repo" -c init.defaultBranch=main init -q .
 echo base > "$W/repo/notes.txt"
 git -C "$W/repo" add -A
 git -C "$W/repo" -c commit.gpgsign=false commit -q -m "chore: base"
+git -C "$W/repo" switch -q -c topic/ledger-rounding
 : > "$W/gh-invocations.log"
 : > "$W/portage-invocations.log"
 printf '%s' "$scenario" > "$W/.scenario"
