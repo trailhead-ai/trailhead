@@ -427,7 +427,7 @@ def _cmd_new_group_cli(
     firing for every member of every new workspace. `--no-wait` (read only by
     `--activate` — the door waits on nothing) skips its wait and says so.
     """
-    from ..spine import _resolve_slug, _die
+    from ..spine import _resolve_slug, _die, _verb_line
     from ..provision.provision import bring_up_workspace
     from ..group.manifest import workspace_dir, manifest_path_for
 
@@ -475,7 +475,7 @@ def _cmd_new_group_cli(
         try:
             bring_up_workspace(group, slug, env=env)
         except Exception as e:
-            _die(f"camp new: workspace bring-up failed: {e}")
+            _die(_verb_line("new", e, detail="workspace bring-up failed: "))
         headline = f"created workspace {slug!r} — provisioning in the background"
 
     # Shared next-step guidance: the headline differs per branch, the two

@@ -361,6 +361,14 @@ def _die(message: str, code: int = 1) -> NoReturn:
     sys.exit(code)
 
 
+def _verb_line(verb: str, message: object, *, detail: str = "") -> str:
+    """One stderr line `camp <verb>: <detail><message>` with a single `camp`
+    prefix: the message's own leading `camp: ` is dropped. *detail* is lead-in
+    text that sits between the verb prefix and the message, such as
+    `workspace bring-up failed: `."""
+    return f"camp {verb}: {detail}{str(message).removeprefix('camp: ')}"
+
+
 def _no_worktree_error() -> NoReturn:
     _die(
         "camp: not inside a worktree and no --name given.\n"

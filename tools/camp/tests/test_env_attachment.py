@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from .env_ssh_stub import free_ports, port_is_free, wait_for
+from .env_ssh_stub import AttachRig, free_ports, port_is_free, wait_for
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -1252,3 +1252,22 @@ def test_a_relocatable_interpreter_reports_a_held_port_as_exactly_the_relays_own
         assert result == f"port {held}: {os.strerror(errno.EADDRINUSE)}"
     finally:
         holder.close()
+
+
+def _ephemeral_range() -> tuple[int, int]:
+    low, high = Path("/proc/sys/net/ipv4/ip_local_port_range").read_text().split()
+    return int(low), int(high)
+
+
+@pytest.mark.skipif(not Path("/proc/sys/net/ipv4/ip_local_port_range").exists(), reason="needs Linux's ephemeral range")
+def test_a_rig_environments_standard_ports_are_outside_the_ephemeral_range(tmp_path: Path) -> None:
+    """Ports the kernel hands other tests' sockets (bind to 0, outbound connects) are not reused as standard ports."""
+    low, high = _ephemeral_range()
+    rig = AttachRig(tmp_path)
+    try:
+        for _ in range(20):
+            ports = rig.environment("main", count=3).standard_ports
+            assert len(set(ports)) == 3
+            assert all(not low <= p <= high and port_is_free(p) for p in ports), ports
+    finally:
+        rig.close()

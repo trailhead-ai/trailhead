@@ -18,10 +18,14 @@ so a handler that named a constant flag, or refused unconditionally, goes red.
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from ._helpers import CLI_CAMP, init_git_repo, run_camp
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -180,3 +184,49 @@ def test_a_flag_belonging_to_another_phase_is_refused_not_ignored(
     )
     assert code == 1
     assert err == "camp transfer-receive: unknown flag '--member'\n"
+
+
+# ---------------------------------------------------------------------------
+# transfer-receive — a lock folder the host cannot use is a refusal, not a crash.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def receive_host(tmp_path: Path) -> dict:
+    """A real camp group on disk, a declared self_name, and a regular file where
+    the worktrees root's lock folder belongs."""
+    config_dir = tmp_path / "camp-config"
+    state_dir = tmp_path / "camp-state"
+    (config_dir / "groups").mkdir(parents=True)
+    state_dir.mkdir()
+    (config_dir / "hosts.toml").write_text('self_name = "receiver"\n', encoding="utf-8")
+    repo = tmp_path / "repo_a"
+    init_git_repo(repo, origin=True)
+    env = {**os.environ, "CAMP_CONFIG_DIR": str(config_dir), "CAMP_STATE_DIR": str(state_dir)}
+    r = run_camp(["group", "rcvgroup", "--member", f"repo_a={repo}"], env=env)
+    assert r.returncode == 0, r.stderr
+    locks = state_dir / "rcvgroup" / "worktrees" / ".locks"
+    locks.parent.mkdir(parents=True, exist_ok=True)
+    locks.write_text("not a directory")
+    return {"env": env, "locks": locks}
+
+
+@pytest.mark.parametrize(
+    "phase_args",
+    [["begin", "--owner", "sender"], ["finish"], ["claim", "--owner", "sender"]],
+    ids=["begin", "finish", "claim"],
+)
+def test_transfer_receive_reports_an_unusable_lock_folder_as_one_clean_line(
+    phase_args: list[str], receive_host
+) -> None:
+    """Each phase reaches the workspace lock; a regular file where the lock folder
+    belongs refuses on stderr with the verb's single prefix, never a traceback."""
+    r = subprocess.run(
+        [sys.executable, str(CLI_CAMP), "transfer-receive", *phase_args,
+         "--group", "rcvgroup", "--slug", "wsx"],
+        capture_output=True, text=True, env=receive_host["env"],
+    )
+    assert r.returncode == 1, r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+    assert len(r.stderr.strip().splitlines()) == 1, r.stderr
+    assert r.stderr.startswith("camp transfer-receive: lock folder "), r.stderr
+    assert str(receive_host["locks"]) in r.stderr, r.stderr

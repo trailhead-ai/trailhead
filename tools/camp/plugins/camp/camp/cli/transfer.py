@@ -232,6 +232,8 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
     module docstring for each phase's contract.
     """
     from ..group.config import GroupConfigError, load_all_groups
+    from ..group.manifest import ManifestError
+    from ..spine import _verb_line
     from ..transfer import receive as receive_mod
     from .common import _groups_dir
 
@@ -305,8 +307,8 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
             slug=slug,
             **phase_kwargs,
         )
-    except receive_mod.ReceiveRefused as e:
-        print(f"camp transfer-receive: {e}", file=sys.stderr)
+    except (receive_mod.ReceiveRefused, ManifestError) as e:
+        print(_verb_line("transfer-receive", e), file=sys.stderr)
         sys.exit(1)
     print(json.dumps(answer))
 

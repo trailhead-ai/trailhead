@@ -73,7 +73,7 @@ def _cmd_setup_group_cli(
     """
     import json as _json
     from ..provision.lifecycle import cmd_setup_group
-    from ..spine import _die
+    from ..spine import _die, _verb_line
 
     parsed = _build_setup_parser().parse_args(args)
 
@@ -108,7 +108,7 @@ def _cmd_setup_group_cli(
     try:
         result = cmd_setup_group(group, slug, env=env)
     except Exception as e:
-        _die(f"camp setup: {e}")
+        _die(_verb_line("setup", e))
 
     if as_json:
         print(_json.dumps(result))
@@ -387,7 +387,7 @@ def _cmd_remove_group_cli(
     from ..group.manifest import manifest_path_for, workspace_dir
     from ..host import HostConfigError
     from ..provision.reconcile import reconcile_break
-    from ..spine import _die
+    from ..spine import _die, _verb_line
 
     parser = group_verb_parser("remove", dry_run=True)
     parser.add_argument("--force", action="store_true")
@@ -477,7 +477,7 @@ def _cmd_remove_group_cli(
         # ManifestError is an Exception; the single handler covers it.
         result = reconcile_break(group, slug, env=env, force=force)
     except Exception as e:
-        _die(f"camp remove: {e}")
+        _die(_verb_line("remove", e))
 
     removed = result.get("removed", [])
     errors = result.get("errors", [])

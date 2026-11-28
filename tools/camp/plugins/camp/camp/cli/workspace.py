@@ -368,7 +368,7 @@ def _cmd_activate_group_cli(
     only the guarded task execution (run_activate_tasks_in_background) — no
     doc, no feedback line — and exits.
     """
-    from ..spine import _die
+    from ..spine import _die, _verb_line
     from ..provision.activation import (
         activate_member,
         run_activate_tasks_in_background,
@@ -403,7 +403,7 @@ def _cmd_activate_group_cli(
         except Exception as e:
             # Never let a detached run crash to a raw traceback in its
             # logfile — nobody is waiting on this process's exit code.
-            print(f"camp activate --background: {e}", file=sys.stderr)
+            print(_verb_line("activate --background", e), file=sys.stderr)
             sys.exit(1)
         return
 
@@ -418,7 +418,7 @@ def _cmd_activate_group_cli(
         print(f"camp activate: {e}", file=sys.stderr)
         sys.exit(1)
     except LockPathError as e:
-        print(f"camp activate: {e}", file=sys.stderr)
+        print(_verb_line("activate", e), file=sys.stderr)
         sys.exit(1)
     except ValueError as e:
         _die(f"camp activate: {e}")

@@ -1230,6 +1230,54 @@ def _plant_symlinked_slug_lock(remove_env, tmp_path: Path) -> Path:
     return victim
 
 
+class TestVerbsRefuseBadLockPathsWithOnePrefix:
+    @pytest.mark.parametrize(
+        ("argv", "prefix", "lines_before"),
+        [
+            (["activate", "--background", "repo_a", "--name", "ws-slug"],
+             "camp activate --background: lock folder ", 0),
+            (["setup", "ws-slug"], "camp setup: lock folder ", 0),
+            # remove prints its ownership notice first when no host name is declared
+            (["remove", "ws-slug"], "camp remove: lock folder ", 1),
+            (["new", "another-slug", "--no-session"],
+             "camp new: workspace bring-up failed: lock folder ", 0),
+        ],
+        ids=["activate-background", "setup", "remove", "new"],
+    )
+    def test_the_refusal_carries_one_camp_prefix(self, remove_env, argv, prefix, lines_before):
+        if "--background" in argv:
+            (remove_env["config_dir"] / "groups" / "rmgroup.toml").write_text(
+                f'''[group]
+name = "rmgroup"
+
+[[members]]
+name = "repo_a"
+repo_root = "{remove_env["repo_a"]}"
+tasks = ["hook"]
+
+[tasks.hook]
+phase = "activate"
+required = true
+
+[[tasks.hook.steps]]
+name = "noop"
+cmd = ["true"]
+'''
+            )
+        locks = _plant_bad_locks_folder(remove_env)
+
+        r = _camp(remove_env, *argv, "--group", "rmgroup", extra_env={"CAMP_TEST_NO_EXEC": "1"})
+
+        assert r.returncode == 1, r.stderr
+        assert "Traceback" not in r.stderr, r.stderr
+        lines = r.stderr.strip().splitlines()
+        assert len(lines) == lines_before + 1, r.stderr
+        refusal = lines[-1]
+        assert refusal.startswith(prefix), r.stderr
+        assert "camp: " not in refusal[len(prefix):], r.stderr
+        assert str(locks) in refusal, r.stderr
+
+
 class TestActivateRefusesBadLockPaths:
     def test_a_regular_file_where_the_lock_folder_belongs_is_one_clean_line(self, remove_env):
         locks = _plant_bad_locks_folder(remove_env)
@@ -1238,7 +1286,8 @@ class TestActivateRefusesBadLockPaths:
 
         assert r.returncode == 1, r.stderr
         assert "Traceback" not in r.stderr, r.stderr
-        assert r.stderr.startswith("camp activate: "), r.stderr
+        assert r.stderr.startswith("camp activate: lock folder "), r.stderr
+        assert "camp: " not in r.stderr[len("camp activate: "):], r.stderr
         assert "is a regular file" in r.stderr and str(locks) in r.stderr, r.stderr
         assert len(r.stderr.strip().splitlines()) == 1, r.stderr
 
